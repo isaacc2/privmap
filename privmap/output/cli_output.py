@@ -1,7 +1,7 @@
 """Rich terminal output renderer."""
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import List
 
 from rich.console import Console
 from rich.panel import Panel
@@ -97,9 +97,6 @@ def _render_user_paths(
     username: str,
     paths: List[EscalationPath],
 ) -> None:
-    # Count by severity
-    crit_count = sum(1 for p in paths if p.severity == Severity.CRITICAL)
-    high_count = sum(1 for p in paths if p.severity == Severity.HIGH)
 
     max_sev = max((p.severity for p in paths if p.severity), default=Severity.INFO)
     color = SEVERITY_COLORS.get(max_sev, "")

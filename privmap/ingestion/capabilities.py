@@ -1,14 +1,12 @@
 """Ingest Linux capabilities from binaries and running processes."""
 from __future__ import annotations
 
-import grp
 import logging
 import os
-import pwd
 import re
 import stat
 import subprocess
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Set, Tuple
 
 from privmap.graph.model import Edge, EdgeType, Node, NodeType, PrivilegeGraph
 

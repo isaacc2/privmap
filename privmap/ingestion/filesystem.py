@@ -5,7 +5,7 @@ import logging
 import os
 import stat
 import subprocess
-from typing import Dict, List, Optional, Set
+from typing import List, Optional
 
 from privmap.graph.model import Edge, EdgeType, Node, NodeType, PrivilegeGraph
 

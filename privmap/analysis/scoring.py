@@ -1,7 +1,6 @@
 """Score escalation paths on exploitability and impact."""
 from __future__ import annotations
 
-import os
 
 from privmap.graph.model import EdgeType, EscalationPath, NodeType, Severity
 

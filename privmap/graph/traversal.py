@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional, Set, Tuple
+from typing import List, Optional, Set
 
 from privmap.graph.model import (
     Edge, EdgeType, EscalationPath, Node, NodeType, PrivilegeGraph,

@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from privmap.graph.model import Edge, EdgeType, Node, NodeType, PrivilegeGraph
 

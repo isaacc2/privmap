@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import List
 
-from privmap.graph.model import EscalationPath, PrivilegeGraph, Severity
+from privmap.graph.model import EscalationPath, PrivilegeGraph
 from privmap.analysis.paths import group_paths_by_user
 
 
@@ -17,8 +17,8 @@ def export_markdown(
 
     # Summary
     lines.append("## Summary\n")
-    lines.append(f"| Metric | Value |")
-    lines.append(f"|--------|-------|")
+    lines.append("| Metric | Value |")
+    lines.append("|--------|-------|")
     lines.append(f"| Graph nodes | {graph.node_count} |")
     lines.append(f"| Graph edges | {graph.edge_count} |")
     lines.append(f"| Total escalation paths | {len(paths)} |")
