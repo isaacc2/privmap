@@ -31,7 +31,7 @@ pip install privmap
 Or from source:
 
 ```bash
-git clone https://github.com/yourusername/privmap.git
+git clone https://github.com/isaacc2/privmap.git
 cd privmap
 pip install -e .
 ```
