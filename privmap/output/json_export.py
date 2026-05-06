@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
+from privmap import __version__
 from privmap.graph.model import EscalationPath, PrivilegeGraph
 
 
@@ -14,7 +15,7 @@ def export_json(
 ) -> str:
     """Export paths (and optionally the full graph) as JSON."""
     output: Dict[str, Any] = {
-        "version": "1.0.0",
+        "version": __version__,
         "summary": {
             "total_paths": len(paths),
             "severity_counts": _severity_counts(paths),

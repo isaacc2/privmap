@@ -167,9 +167,22 @@ class FilesystemIngester:
         if stat.S_ISREG(mode) and (mode & stat.S_ISGID):
             self._add_suid_node(graph, fpath, is_sgid=True, stat_result=st)
 
-        # World-writable
+        # World-writable. Skip files inside a sticky directory (e.g. /tmp, /var/tmp)
+        # because the sticky bit prevents non-owners from replacing or unlinking
+        # them, so the world-writable bit isn't actually exploitable.
         if mode & stat.S_IWOTH:
-            self._add_world_writable_node(graph, fpath, is_dir=is_dir, stat_result=st)
+            if not is_dir and self._parent_is_sticky(fpath):
+                logger.debug("Skipping world-writable in sticky dir: %s", fpath)
+            else:
+                self._add_world_writable_node(graph, fpath, is_dir=is_dir, stat_result=st)
+
+    @staticmethod
+    def _parent_is_sticky(fpath: str) -> bool:
+        try:
+            parent_st = os.stat(os.path.dirname(fpath))
+        except (OSError, PermissionError):
+            return False
+        return bool(parent_st.st_mode & stat.S_ISVTX)
 
     def _add_suid_node(
         self,
@@ -295,38 +308,81 @@ class FilesystemIngester:
                 )
                 if result.returncode == 0:
                     self._parse_acl_output(graph, result.stdout)
-            except (subprocess.TimeoutExpired, OSError) as e:
+            except subprocess.TimeoutExpired:
+                # An ACL scan that times out has produced incomplete output —
+                # surface this loudly so a user doesn't trust a clean report.
+                logger.warning(
+                    "ACL scan timed out on %s; results for this path are incomplete. "
+                    "Consider narrowing --scan-paths.", full_path,
+                )
+            except OSError as e:
                 logger.debug("ACL scan failed for %s: %s", full_path, e)
 
     def _parse_acl_output(self, graph: PrivilegeGraph, output: str) -> None:
-        """Parse getfacl output and add ACL-based edges."""
+        """Parse getfacl output and add ACL-based edges.
+
+        Honors both ``user:NAME:`` entries (named-user ACL) and ``group:NAME:``
+        entries (named-group ACL). Most real escalation paths via ACLs go
+        through groups, so ignoring group entries underreports findings.
+        """
         current_file = None
         for line in output.split("\n"):
             line = line.strip()
             if line.startswith("# file:"):
                 current_file = line.split(":", 1)[1].strip()
-            elif current_file and line.startswith("user:"):
-                parts = line.split(":")
-                if len(parts) >= 3:
-                    username = parts[1]
-                    perms = parts[2]
-                    if username and "w" in perms:
-                        user_id = f"user:{username}"
-                        file_id = f"file:{current_file}"
-                        if graph.get_node(user_id):
-                            file_node = Node(
-                                id=file_id,
-                                node_type=NodeType.FILE,
-                                name=current_file,
-                                properties={"path": current_file, "acl_writable": True},
-                            )
-                            graph.add_node(file_node)
-                            graph.add_edge(Edge(
-                                source_id=user_id,
-                                target_id=file_id,
-                                edge_type=EdgeType.CAN_WRITE,
-                                properties={"reason": "ACL", "acl_perms": perms},
-                            ))
+                continue
+            if not current_file:
+                continue
+
+            parts = line.split(":")
+            if len(parts) < 3:
+                continue
+            kind, name, perms = parts[0], parts[1], parts[2]
+            # Skip the bare "user::" / "group::" / "other::" mode entries —
+            # those duplicate the standard mode bits handled elsewhere.
+            if not name or "w" not in perms:
+                continue
+
+            file_id = f"file:{current_file}"
+
+            if kind == "user":
+                principal_id = f"user:{name}"
+                principals = [principal_id] if graph.get_node(principal_id) else []
+            elif kind == "group":
+                group_id = f"group:{name}"
+                if not graph.get_node(group_id):
+                    continue
+                # Expand the group into its member users — MEMBER_OF runs
+                # user -> group, so we walk incoming edges on the group.
+                principals = [
+                    edge.source_id
+                    for edge in graph.get_edges_to(group_id)
+                    if edge.edge_type == EdgeType.MEMBER_OF
+                ]
+            else:
+                continue
+
+            if not principals:
+                continue
+
+            file_node = Node(
+                id=file_id,
+                node_type=NodeType.FILE,
+                name=current_file,
+                properties={"path": current_file, "acl_writable": True},
+            )
+            graph.add_node(file_node)
+            for principal_id in principals:
+                graph.add_edge(Edge(
+                    source_id=principal_id,
+                    target_id=file_id,
+                    edge_type=EdgeType.CAN_WRITE,
+                    properties={
+                        "reason": f"ACL ({kind})",
+                        "acl_perms": perms,
+                        "acl_principal": name,
+                    },
+                ))
 
     def _parse_acl_file(self, graph: PrivilegeGraph, acl_path: str) -> None:
         try:

@@ -30,8 +30,11 @@ DANGEROUS_CAPS = {
 # Binaries that legitimately carry capabilities as part of normal system operation.
 # These use caps internally for a narrow purpose and drop/contain them before the
 # caller can leverage them. Flagging these produces noise with no actionable finding.
-# This list mirrors the approach taken by mainstream auditing tools (lynis, linux-exploit-suggester)
-# and aligns with default package configurations on Debian, Ubuntu, RHEL, and Fedora.
+# This list mirrors the approach taken by mainstream auditing tools (lynis,
+# linux-exploit-suggester) and aligns with default package configurations on
+# Debian, Ubuntu, RHEL, and Fedora.
+#
+# Single source of truth — imported by graph.traversal as well.
 KNOWN_SAFE_CAP_BINARIES = {
     "ping", "ping4", "ping6",
     "mtr", "mtr-packet",
@@ -61,11 +64,15 @@ def _user_can_execute(
 
     Falls through user -> group -> other so that a user who is also in
     the file's group still gets group access if the user-bit is unset.
+
+    Fails closed on stat errors — without mode bits we cannot prove the user
+    has execute permission, so we don't fabricate a CAN_EXEC edge.
     """
     try:
         st = os.stat(binary_path)
-    except (OSError, PermissionError):
-        return True
+    except (OSError, PermissionError) as e:
+        logger.debug("stat failed on %s: %s — assuming not executable", binary_path, e)
+        return False
 
     mode = st.st_mode
     file_uid = st.st_uid
@@ -85,6 +92,68 @@ def _user_can_execute(
 
     # Otherwise check the other-execute bit
     return bool(mode & stat.S_IXOTH)
+
+
+def _user_can_execute_from_perms(
+    binary_path: str,
+    user_name: str,
+    user_groups: Set[str],
+    perms_map: dict,
+) -> bool:
+    """Snapshot-mode equivalent of :func:`_user_can_execute`.
+
+    ``perms_map`` is a dict path -> (mode_int, owner_name, group_name) parsed
+    from the snapshot's ``suid/permissions.txt``. Falls back to fail-closed
+    when the binary isn't in the map.
+    """
+    entry = perms_map.get(binary_path)
+    if entry is None:
+        return False
+    mode, owner, group = entry
+
+    if user_name == "root":
+        return True
+
+    if user_name == owner and (mode & stat.S_IXUSR):
+        return True
+
+    if group in user_groups and (mode & stat.S_IXGRP):
+        return True
+
+    return bool(mode & stat.S_IXOTH)
+
+
+def _resolve_user_group_names(graph: PrivilegeGraph, user_node: Node) -> Set[str]:
+    """Collect the names of all groups the user belongs to."""
+    groups: Set[str] = set()
+    for neighbor, edge in graph.get_neighbors(user_node.id):
+        if edge.edge_type == EdgeType.MEMBER_OF and neighbor.node_type == NodeType.GROUP:
+            groups.add(neighbor.name)
+    return groups
+
+
+def _load_snapshot_perms(perms_file: str) -> dict:
+    """Load ``suid/permissions.txt`` into a dict for snapshot-mode perm checks.
+
+    Format (from collect.sh): ``mode owner group path`` where ``mode`` is octal
+    digits without a leading zero (``find -printf '%m'`` / ``stat -c '%a'``).
+    """
+    perms: dict = {}
+    try:
+        with open(perms_file, "r") as f:
+            for line in f:
+                parts = line.rstrip("\n").split(None, 3)
+                if len(parts) < 4:
+                    continue
+                mode_s, owner, group, path = parts
+                try:
+                    mode = int(mode_s, 8)
+                except ValueError:
+                    continue
+                perms[path] = (mode, owner, group)
+    except (OSError, PermissionError):
+        pass
+    return perms
 
 
 def _resolve_user_groups(
@@ -109,6 +178,9 @@ class CapabilityIngester:
     def __init__(self, root_path: str = "/", snapshot_mode: bool = False) -> None:
         self.root = root_path
         self.snapshot = snapshot_mode
+        # Populated in snapshot mode from suid/permissions.txt and consulted
+        # by _parse_getcap_output to enforce per-user execute checks.
+        self._snapshot_perms: dict = {}
 
     def _path(self, *parts: str) -> str:
         return os.path.join(self.root, *parts)
@@ -120,9 +192,11 @@ class CapabilityIngester:
             self._ingest_live(graph)
 
     def _ingest_live(self, graph: PrivilegeGraph) -> None:
+        # Honor a chrooted/alternate root_path. Defaults to "/" so a normal
+        # live run is unchanged.
         try:
             result = subprocess.run(
-                ["getcap", "-r", "/"],
+                ["getcap", "-r", self.root],
                 capture_output=True, text=True, timeout=120,
             )
             if result.returncode == 0 or result.stdout:
@@ -134,6 +208,10 @@ class CapabilityIngester:
         self._ingest_proc_caps(graph)
 
     def _ingest_snapshot(self, graph: PrivilegeGraph) -> None:
+        perms_file = self._path("suid", "permissions.txt")
+        if os.path.isfile(perms_file):
+            self._snapshot_perms = _load_snapshot_perms(perms_file)
+
         caps_file = self._path("caps", "file_capabilities.txt")
         if os.path.isfile(caps_file):
             with open(caps_file, "r") as f:
@@ -225,23 +303,25 @@ class CapabilityIngester:
                         },
                     ))
 
-            # Create CAN_EXEC edges only for users who can actually execute the binary,
-            # based on file ownership, group, and mode bits.
-            binary_full_path = binary_path
-            if self.snapshot:
-                # In snapshot mode we can't stat the original path; skip perm check
-                # and fall through to conservative behavior (all non-root users).
-                binary_full_path = None
-
+            # Create CAN_EXEC edges only for users who can actually execute the
+            # binary, based on file ownership, group, and mode bits. In snapshot
+            # mode the check is sourced from the collected permissions.txt; if
+            # that's missing or doesn't list this binary we fail closed (no edge)
+            # rather than over-reporting CAN_EXEC for every non-root user.
             for user_node in graph.get_nodes_by_type(NodeType.USER):
                 # Skip root — root can already do everything
                 if user_node.properties.get("uid") == 0:
                     continue
 
-                uid, gid, supp_gids = _resolve_user_groups(graph, user_node)
-
-                if binary_full_path is not None:
-                    if not _user_can_execute(binary_full_path, uid, gid, supp_gids):
+                if self.snapshot:
+                    user_groups = _resolve_user_group_names(graph, user_node)
+                    if not _user_can_execute_from_perms(
+                        binary_path, user_node.name, user_groups, self._snapshot_perms,
+                    ):
+                        continue
+                else:
+                    uid, gid, supp_gids = _resolve_user_groups(graph, user_node)
+                    if not _user_can_execute(binary_path, uid, gid, supp_gids):
                         continue
 
                 graph.add_edge(Edge(

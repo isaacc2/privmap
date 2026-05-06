@@ -7,6 +7,7 @@ from typing import List, Optional, Set
 from privmap.graph.model import (
     Edge, EdgeType, EscalationPath, Node, NodeType, PrivilegeGraph,
 )
+from privmap.ingestion.capabilities import KNOWN_SAFE_CAP_BINARIES
 
 logger = logging.getLogger(__name__)
 
@@ -43,24 +44,6 @@ SUDO_SHELL_ESCAPE = {
     "apt-get", "apt", "yum", "dnf", "pip", "pip3",
     "cpan", "gem",
 }
-
-# Capability binaries that are part of standard system packages and use caps
-# internally without exposing them to the caller. These are not exploitable
-# through normal execution. Matches the allowlist in ingestion/capabilities.py;
-# duplicated here as a safety net in case a snapshot or older graph still
-# contains edges for these binaries.
-KNOWN_SAFE_CAP_BINARIES = {
-    "ping", "ping4", "ping6",
-    "mtr", "mtr-packet",
-    "traceroute", "traceroute6",
-    "arping", "clockdiff",
-    "snap-confine",
-    "systemd-detect-virt",
-    "gnome-keyring-daemon",
-    "iio-sensor-proxy",
-    "chronyd", "ntpd",
-}
-
 
 def is_sink_node(node: Node) -> bool:
     """Determine if a node is a high-value escalation target."""

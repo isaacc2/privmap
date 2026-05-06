@@ -82,6 +82,66 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+# Hard limits on snapshot extraction to defend against malicious or malformed archives.
+# 2 GiB total uncompressed, 200k members — comfortable headroom for a legitimate
+# whole-system snapshot, low enough to refuse a tar/zip bomb.
+_MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024 * 1024
+_MAX_SNAPSHOT_MEMBERS = 200_000
+
+
+def _safe_extract_tar(tar: tarfile.TarFile, dest: str) -> None:
+    """Extract a tar archive while refusing path traversal, absolute paths,
+    symlinks/hardlinks pointing outside the destination, special device files,
+    and archives that exceed the size/member-count budget.
+
+    Mitigates CVE-2007-4559 across all supported Python versions; on 3.12+ this
+    is roughly equivalent to passing ``filter="data"``.
+    """
+    dest_real = os.path.realpath(dest)
+    total_bytes = 0
+    member_count = 0
+
+    for member in tar:
+        member_count += 1
+        if member_count > _MAX_SNAPSHOT_MEMBERS:
+            raise ValueError(
+                f"snapshot exceeds member limit ({_MAX_SNAPSHOT_MEMBERS})"
+            )
+        total_bytes += member.size
+        if total_bytes > _MAX_SNAPSHOT_BYTES:
+            raise ValueError(
+                f"snapshot exceeds size limit ({_MAX_SNAPSHOT_BYTES} bytes)"
+            )
+
+        # Reject device, FIFO, and other special files outright. A snapshot
+        # only ever needs regular files, directories, and symlinks.
+        if not (member.isreg() or member.isdir() or member.issym() or member.islnk()):
+            raise ValueError(f"refusing special file in snapshot: {member.name!r}")
+
+        # Reject absolute paths and any traversal that escapes ``dest``.
+        target = os.path.realpath(os.path.join(dest, member.name))
+        if not (target == dest_real or target.startswith(dest_real + os.sep)):
+            raise ValueError(f"unsafe path in snapshot: {member.name!r}")
+
+        # For links, also resolve the link target relative to its containing
+        # directory and ensure it stays inside ``dest``.
+        if member.issym() or member.islnk():
+            link_target = member.linkname
+            if os.path.isabs(link_target):
+                raise ValueError(
+                    f"absolute link target in snapshot: {member.name!r} -> {link_target!r}"
+                )
+            link_real = os.path.realpath(
+                os.path.join(os.path.dirname(target), link_target)
+            )
+            if not (link_real == dest_real or link_real.startswith(dest_real + os.sep)):
+                raise ValueError(
+                    f"link escapes snapshot root: {member.name!r} -> {link_target!r}"
+                )
+
+        tar.extract(member, dest)
+
+
 def setup_logging(verbosity: int) -> None:
     if verbosity >= 2:
         level = logging.DEBUG
@@ -118,8 +178,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.info("Extracting snapshot to %s", temp_dir)
         try:
             with tarfile.open(args.snapshot, "r:gz") as tar:
-                tar.extractall(temp_dir)
-        except (tarfile.TarError, OSError) as e:
+                _safe_extract_tar(tar, temp_dir)
+        except (tarfile.TarError, OSError, ValueError) as e:
             print(f"Error extracting snapshot: {e}", file=sys.stderr)
             return 1
 

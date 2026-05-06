@@ -138,16 +138,18 @@ class IdentityIngester:
 
                     node = graph.get_node(f"user:{username}")
                     if node:
-                        locked = password_hash.startswith("!") or \
-                                 password_hash.startswith("*") or \
-                                 password_hash == "!!" or \
-                                 password_hash == ""
+                        # "!" / "!!" / "*" prefixes denote a locked account, NOT
+                        # a passwordless one. Empty field truly means no password.
+                        locked = (
+                            password_hash.startswith("!")
+                            or password_hash.startswith("*")
+                        )
+                        empty = password_hash == ""
                         node.properties["account_locked"] = locked
                         node.properties["has_password"] = (
-                            not locked and len(password_hash) > 2
+                            not locked and not empty and len(password_hash) > 2
                         )
-                        # Detect weak/empty password hashes
-                        if password_hash == "" or password_hash == "!":
+                        if empty:
                             node.properties["empty_password"] = True
         except PermissionError:
             logger.debug("Cannot read shadow file (permission denied)")
@@ -259,12 +261,18 @@ class IdentityIngester:
                 if runas_user == "ALL":
                     runas_user = "root"
 
+        # NOPASSWD: / PASSWD: are tags that only appear at the start of a
+        # command spec or after a comma. Use an anchored regex so a path
+        # argument that happens to contain the literal "NOPASSWD:" doesn't
+        # flip the flag.
         nopasswd = False
-        if "NOPASSWD:" in cmd_spec:
+        nopasswd_re = re.compile(r"(^|,\s*)NOPASSWD:\s*", re.IGNORECASE)
+        passwd_re = re.compile(r"(^|,\s*)PASSWD:\s*", re.IGNORECASE)
+        if nopasswd_re.search(cmd_spec):
             nopasswd = True
-            cmd_spec = cmd_spec.replace("NOPASSWD:", "").strip()
-        if "PASSWD:" in cmd_spec:
-            cmd_spec = cmd_spec.replace("PASSWD:", "").strip()
+            cmd_spec = nopasswd_re.sub(r"\1", cmd_spec)
+        if passwd_re.search(cmd_spec):
+            cmd_spec = passwd_re.sub(r"\1", cmd_spec)
 
         # Split commands
         commands = [c.strip() for c in cmd_spec.split(",")]

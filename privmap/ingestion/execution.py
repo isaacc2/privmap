@@ -230,14 +230,34 @@ class ExecutionIngester:
             ))
 
     def _extract_executables(self, command: str) -> List[str]:
-        """Extract absolute paths to executables from a command string."""
-        executables = []
-        # Match absolute paths
-        for match in re.finditer(r"(/[\w./-]+)", command):
-            path = match.group(1)
-            if not path.endswith("/"):
-                executables.append(path)
-        return executables if executables else []
+        """Extract the executable path(s) from a command string.
+
+        Only returns the actual program being invoked, not every path-looking
+        argument. ``find /etc -name foo`` should yield ``/usr/bin/find`` (or
+        just ``find``), not ``["/usr/bin/find", "/etc"]``.
+
+        Walks pipe / && / ; / | separators so a chained command
+        ``/usr/bin/foo && /usr/bin/bar`` yields both binaries.
+        """
+        executables: List[str] = []
+        # Split on shell command separators so each segment is one invocation.
+        for segment in re.split(r"(?:\|\||&&|;|\||\bthen\b|\bdo\b)", command):
+            seg = segment.strip()
+            if not seg:
+                continue
+            # Drop leading env-var assignments: FOO=bar BAZ=qux /usr/bin/cmd ...
+            tokens = seg.split()
+            i = 0
+            while i < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tokens[i]):
+                i += 1
+            if i >= len(tokens):
+                continue
+            head = tokens[i]
+            # Only emit absolute paths — relative names depend on $PATH and
+            # would create ambiguous file nodes.
+            if head.startswith("/") and not head.endswith("/"):
+                executables.append(head)
+        return executables
 
     # ── Systemd ──
     def _ingest_systemd(self, graph: PrivilegeGraph) -> None:
@@ -349,12 +369,10 @@ class ExecutionIngester:
                 ))
 
     def _extract_executables_from_cmd(self, cmd: str) -> List[str]:
-        paths = []
-        for match in re.finditer(r"(/[\w./-]+)", cmd):
-            path = match.group(1)
-            if not path.endswith("/"):
-                paths.append(path)
-        return paths
+        # ExecStart= directives are a single command (with arguments), not a
+        # shell pipeline, so we only need the head token. Reusing the cron
+        # logic keeps behavior consistent.
+        return self._extract_executables(cmd)
 
     # ── Init.d ──
     def _ingest_initd(self, graph: PrivilegeGraph) -> None:
