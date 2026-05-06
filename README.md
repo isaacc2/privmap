@@ -1,4 +1,6 @@
 # privmap
+![tests](https://github.com/isaacc2/privmap/workflows/tests/badge.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Linux privilege graph engine. privmap models effective access on a Linux system as a directed graph and traces concrete privilege escalation paths through it.
 
