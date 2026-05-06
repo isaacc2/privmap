@@ -23,8 +23,6 @@ DANGEROUS_CAPS = {
     "cap_sys_rawio",
     "cap_fowner",
     "cap_chown",
-    "cap_net_admin",
-    "cap_net_raw",
     "cap_mknod",
     "cap_sys_chroot",
 }
@@ -35,27 +33,20 @@ DANGEROUS_CAPS = {
 # This list mirrors the approach taken by mainstream auditing tools (lynis, linux-exploit-suggester)
 # and aligns with default package configurations on Debian, Ubuntu, RHEL, and Fedora.
 KNOWN_SAFE_CAP_BINARIES = {
-    # Networking utilities — need cap_net_raw / cap_net_bind_service
-    "ping",
-    "ping4",
-    "ping6",
-    "mtr",
-    "mtr-packet",
-    "traceroute",
-    "traceroute6",
-    "arping",
-    "clockdiff",
-    # Snap sandboxing — uses caps to build sandbox, drops before exec
+    "ping", "ping4", "ping6",
+    "mtr", "mtr-packet",
+    "traceroute", "traceroute6",
+    "arping", "clockdiff",
+    "fping",
+    "nmap",
+    "dumpcap",
+    "tcpdump",
+    "gst-ptp-helper",
     "snap-confine",
-    # Systemd components — cap_sys_admin etc. for internal use only
     "systemd-detect-virt",
-    # Gnome keyring — cap_ipc_lock
     "gnome-keyring-daemon",
-    # Industrial I/O — cap_net_admin for device access
     "iio-sensor-proxy",
-    # Chrony / NTP — cap_sys_time
-    "chronyd",
-    "ntpd",
+    "chronyd", "ntpd",
 }
 
 

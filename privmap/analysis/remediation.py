@@ -135,7 +135,15 @@ def generate_remediation(path: EscalationPath) -> None:
         elif edge.edge_type == EdgeType.MEMBER_OF:
             if target_node:
                 group = target_node.name
-                if group in ("docker", "lxd", "disk", "adm", "shadow"):
+                if group in ("sudo", "wheel", "admin"):
+                    risks.append(
+                        f"Membership in admin group '{group}' grants full root via sudo (intended for admin accounts)"
+                    )
+                    if source_node:
+                        steps.append(
+                            f"If {source_node.name} is not an admin account, remove from {group} group"
+                        )
+                elif group in ("docker", "lxd", "disk", "adm", "shadow"):
                     risks.append(
                         f"Membership in privileged group '{group}'"
                     )

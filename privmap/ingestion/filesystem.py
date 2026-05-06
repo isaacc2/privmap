@@ -11,6 +11,31 @@ from privmap.graph.model import Edge, EdgeType, Node, NodeType, PrivilegeGraph
 
 logger = logging.getLogger(__name__)
 
+KNOWN_SAFE_SUID_BINARIES = {
+    "chrome-sandbox",
+    "firejail",
+    "bwrap",
+    "fusermount",
+    "fusermount3",
+    "polkit-agent-helper-1",
+}
+
+EXCLUDED_PATH_PREFIXES = (
+    "/usr/share",
+    "/usr/src",
+    "/usr/include",
+    "/usr/lib/locale",
+    "/usr/lib/python",
+    "/usr/lib/x86_64-linux-gnu/locale",
+    "/var/log",
+    "/var/cache",
+    "/var/lib/docker",
+    "/var/lib/snapd",
+    "/var/lib/flatpak",
+    "/proc",
+    "/sys",
+    "/snap",
+)
 
 class FilesystemIngester:
     def __init__(
@@ -96,22 +121,33 @@ class FilesystemIngester:
                         self._check_symlink(graph, link.strip(), target.strip())
 
     def _walk_directory(self, graph: PrivilegeGraph, base_path: str) -> None:
+        file_count = 0
         try:
             for dirpath, dirnames, filenames in os.walk(base_path, followlinks=False):
-                # Check directory itself
+                dirnames[:] = [
+                    d for d in dirnames
+                    if not any(
+                        os.path.join(dirpath, d).startswith(prefix)
+                        for prefix in EXCLUDED_PATH_PREFIXES
+                    )
+                ]
+                
                 self._check_path(graph, dirpath, is_dir=True)
 
                 for fname in filenames:
                     fpath = os.path.join(dirpath, fname)
                     self._check_path(graph, fpath, is_dir=False)
+                    file_count += 1
+                    if file_count % 10000 == 0:
+                        logger.info("  Walked %d files in %s...", file_count, base_path)
 
-                    # Symlink detection
                     if os.path.islink(fpath):
                         try:
                             target = os.readlink(fpath)
                             self._check_symlink(graph, fpath, target)
                         except OSError:
                             pass
+            logger.info("  Completed walk of %s: %d files", base_path, file_count)
         except PermissionError:
             logger.debug("Permission denied walking: %s", base_path)
 
@@ -146,6 +182,10 @@ class FilesystemIngester:
         import grp
 
         binary_name = os.path.basename(fpath)
+        if binary_name in KNOWN_SAFE_SUID_BINARIES:
+            logger.debug("Skipping known-safe SUID binary: %s (%s)", binary_name, fpath)
+            return
+
         node_id = f"suid:{fpath}"
 
         props = {"path": fpath, "binary": binary_name, "sgid": is_sgid, "suid": not is_sgid}

@@ -12,3 +12,4 @@ build/
 .venv/
 venv/
 privmap_snapshot_*/
+.vscode/
