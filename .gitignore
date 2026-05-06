@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.tar.gz
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.venv/
+venv/
+privmap_snapshot_*/
