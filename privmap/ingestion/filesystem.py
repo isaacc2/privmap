@@ -5,11 +5,15 @@ import logging
 import os
 import stat
 import subprocess
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from privmap.graph.model import Edge, EdgeType, Node, NodeType, PrivilegeGraph
 
 logger = logging.getLogger(__name__)
+
+# Same signature as builder.ProgressCallback. Decoupled to avoid a circular
+# import when the ingester is exercised directly.
+ProgressCallback = Callable[[str, Optional[str]], None]
 
 KNOWN_SAFE_SUID_BINARIES = {
     "chrome-sandbox",
@@ -43,10 +47,12 @@ class FilesystemIngester:
         root_path: str = "/",
         scan_paths: Optional[List[str]] = None,
         snapshot_mode: bool = False,
+        progress: Optional[ProgressCallback] = None,
     ) -> None:
         self.root = root_path
         self.scan_paths = scan_paths or ["/etc", "/usr", "/opt", "/tmp", "/var"]
         self.snapshot = snapshot_mode
+        self._progress = progress or (lambda phase, detail: None)
 
     def _path(self, *parts: str) -> str:
         return os.path.join(self.root, *parts)
@@ -131,14 +137,18 @@ class FilesystemIngester:
                         for prefix in EXCLUDED_PATH_PREFIXES
                     )
                 ]
-                
+
                 self._check_path(graph, dirpath, is_dir=True)
 
                 for fname in filenames:
                     fpath = os.path.join(dirpath, fname)
                     self._check_path(graph, fpath, is_dir=False)
                     file_count += 1
-                    if file_count % 10000 == 0:
+                    if file_count % 5000 == 0:
+                        self._progress(
+                            "Walking filesystem",
+                            f"{base_path}: {file_count:,} files",
+                        )
                         logger.info("  Walked %d files in %s...", file_count, base_path)
 
                     if os.path.islink(fpath):
@@ -147,6 +157,10 @@ class FilesystemIngester:
                             self._check_symlink(graph, fpath, target)
                         except OSError:
                             pass
+            self._progress(
+                "Walking filesystem",
+                f"{base_path}: {file_count:,} files (done)",
+            )
             logger.info("  Completed walk of %s: %d files", base_path, file_count)
         except PermissionError:
             logger.debug("Permission denied walking: %s", base_path)

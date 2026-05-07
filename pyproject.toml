@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "privmap"
-version = "1.0.3"
+version = "1.0.4"
 description = "Linux privilege graph engine — model effective access, trace escalation paths."
 readme = "README.md"
 license = {text = "MIT"}

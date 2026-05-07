@@ -18,18 +18,38 @@ DANGEROUS_CAPABILITIES = {
     "cap_fowner", "cap_chown", "cap_sys_rawio",
 }
 
-# SUID binaries known to allow shell escapes (GTFOBins-informed)
+# SUID binaries known to allow shell escapes (GTFOBins-informed). These give
+# the caller arbitrary code execution as the file owner with no further
+# authentication, so a SUID-root copy is a true free escalation.
 GTFOBINS_SUID = {
     "bash", "sh", "dash", "zsh", "csh", "ksh", "fish",
     "python", "python2", "python3", "perl", "ruby", "lua",
     "vim", "vi", "nano", "emacs", "less", "more", "man",
     "find", "nmap", "awk", "gawk", "sed",
     "env", "nice", "ionice", "strace", "ltrace",
-    "gdb", "docker", "pkexec", "cp", "mv",
+    "gdb", "cp", "mv",
     "tar", "zip", "unzip", "rsync",
     "ssh", "scp", "socat", "nc", "ncat",
     "node", "php", "tclsh", "wish",
-    "doas", "su",
+    "docker",
+}
+
+# SUID binaries that are SUID by design and gate access behind a credential
+# prompt (the user's own password, the target user's password, PAM, etc.).
+# These should not be reported as free escalation paths just because they
+# exist on the system. Specific CVEs against these binaries (e.g. PwnKit
+# against pkexec) are out of scope here — privmap does not do version-based
+# CVE matching; use a vulnerability scanner alongside it.
+AUTH_REQUIRED_SUID = {
+    "su", "sudo", "doas",
+    "pkexec",
+    "login",
+    "passwd", "chsh", "chfn", "gpasswd", "newgrp", "chage", "expiry",
+    "mount", "umount",
+    "ping", "ping6",
+    "ssh-agent", "ssh-keysign",
+    "at",
+    "crontab",
 }
 
 # Sudo commands known to allow shell escapes
@@ -215,12 +235,17 @@ def _dfs_find_paths(
 
             # Special handling: SUID_EXEC edges only matter if the binary is
             # actually exploitable (i.e. allows a shell escape per GTFOBins).
-            # Standard SUID binaries (passwd, sudo, mount, ssh-agent, etc.) are
-            # SUID by design and do not grant arbitrary code execution.
+            # Standard SUID binaries (passwd, sudo, mount, ssh-agent, su,
+            # pkexec, etc.) are SUID by design and gate access behind a
+            # credential prompt — they aren't free escalation paths.
             if edge.edge_type == EdgeType.SUID_EXEC:
                 binary_path = edge.properties.get("path", "")
-                binary_name = binary_path.rsplit("/", 1)[-1] if "/" in binary_path else binary_path
-                if binary_name.lower() not in GTFOBINS_SUID:
+                binary_name = (
+                    binary_path.rsplit("/", 1)[-1] if "/" in binary_path else binary_path
+                ).lower()
+                if binary_name in AUTH_REQUIRED_SUID:
+                    continue
+                if binary_name not in GTFOBINS_SUID:
                     continue
 
             path_nodes.append(neighbor)

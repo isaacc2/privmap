@@ -78,6 +78,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default=0,
         help="Increase verbosity (-v info, -vv debug).",
     )
+    parser.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress progress output. Errors still go to stderr.",
+    )
 
     return parser.parse_args(argv)
 
@@ -142,6 +147,23 @@ def _safe_extract_tar(tar: tarfile.TarFile, dest: str) -> None:
         tar.extract(member, dest)
 
 
+class _NullStatus:
+    """No-op stand-in for rich.console.Status when progress is suppressed.
+
+    Mirrors the bits of the Status API the CLI actually uses (``__enter__``,
+    ``__exit__``, ``update``) so the with-block doesn't need a branch.
+    """
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+    def update(self, *args, **kwargs) -> None:
+        return None
+
+
 def setup_logging(verbosity: int) -> None:
     if verbosity >= 2:
         level = logging.DEBUG
@@ -198,41 +220,72 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Severity filter
     min_severity = Severity(args.min_severity.upper())
 
+    # Progress spinner — always on stderr so it doesn't pollute json/markdown
+    # output, and so a user piping `privmap > report.json` still sees it.
+    # Suppressed by --quiet, in non-TTY environments, and when -v/-vv is on
+    # (raw log lines are more useful then than a transient spinner).
+    from rich.console import Console
+    progress_console = Console(stderr=True)
+    show_progress = (
+        not args.quiet
+        and args.verbose == 0
+        and progress_console.is_terminal
+    )
+
     try:
-        # Build graph
-        builder = GraphBuilder(
-            root_path=root_path,
-            scan_paths=scan_paths,
-            snapshot_mode=snapshot_mode,
-        )
-        graph = builder.build()
-
-        # Analyze paths
-        paths = analyze_paths(
-            graph,
-            source_users=args.users,
-            max_depth=args.max_depth,
-            min_severity=min_severity,
+        status_cm = (
+            progress_console.status("[bold cyan]Initialising[/bold cyan]")
+            if show_progress
+            else _NullStatus()
         )
 
-        # Export full graph if requested
+        with status_cm as status:
+            def progress_cb(phase: str, detail: Optional[str]) -> None:
+                msg = f"[bold cyan]{phase}[/bold cyan]"
+                if detail:
+                    msg += f"  [dim]{detail}[/dim]"
+                status.update(msg)
+
+            builder = GraphBuilder(
+                root_path=root_path,
+                scan_paths=scan_paths,
+                snapshot_mode=snapshot_mode,
+                progress=progress_cb,
+            )
+            graph = builder.build()
+
+            progress_cb("Tracing escalation paths", None)
+            paths = analyze_paths(
+                graph,
+                source_users=args.users,
+                max_depth=args.max_depth,
+                min_severity=min_severity,
+            )
+
+        # Spinner is closed before any output is rendered so the redrawn
+        # spinner line doesn't interleave with the report.
+        if show_progress:
+            progress_console.print(
+                f"[green]✓[/green] Analysis complete: "
+                f"[bold]{graph.node_count}[/bold] nodes, "
+                f"[bold]{graph.edge_count}[/bold] edges, "
+                f"[bold]{len(paths)}[/bold] paths"
+            )
+
         if args.export_graph:
             graph_json = json.dumps(graph.to_dict(), indent=2, default=str)
             with open(args.export_graph, "w") as f:
                 f.write(graph_json)
             logger.info("Graph exported to %s", args.export_graph)
 
-        # Output
         if args.output == "json":
             print(export_json(paths, graph))
         elif args.output == "markdown":
             print(export_markdown(paths, graph))
         else:
-            from rich.console import Console
             console = Console(stderr=True) if args.exit_code else Console()
             render_cli(paths, graph, console)
 
-        # Exit code
         if args.exit_code and paths:
             return 1
         return 0

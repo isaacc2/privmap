@@ -52,7 +52,18 @@ class ExecutionIngester:
         else:
             user_cron_dir = self._path("var", "spool", "cron", "crontabs")
         if os.path.isdir(user_cron_dir):
-            for username in os.listdir(user_cron_dir):
+            try:
+                entries = os.listdir(user_cron_dir)
+            except (PermissionError, OSError) as e:
+                # /var/spool/cron/crontabs is mode 0730 root:crontab on Debian-
+                # family systems — unreadable to non-root callers. Warn but
+                # continue so unprivileged users still get a partial scan.
+                logger.warning(
+                    "Cannot read user crontab dir %s: %s. "
+                    "Run as root for complete results.", user_cron_dir, e,
+                )
+                entries = []
+            for username in entries:
                 fpath = os.path.join(user_cron_dir, username)
                 if os.path.isfile(fpath):
                     self._parse_user_crontab(graph, fpath, username)

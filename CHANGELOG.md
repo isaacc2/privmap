@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.0.4
+
+### Correctness
+- Auth-required SUID binaries (`su`, `pkexec`, `sudo`, `doas`, `passwd`, `chsh`, `mount`, `ssh-agent`, etc.) are no longer reported as free escalation paths. They are SUID by design and gate access behind a credential prompt; flagging them produced a critical-severity finding for every user on every system. Specific CVEs against these binaries (e.g. PwnKit) are out of scope — privmap does not do version-based CVE matching.
+- An unreadable `/var/spool/cron/crontabs` (mode `0730 root:crontab` on Debian-family systems) no longer crashes the run. Now logs a warning and continues with a partial scan.
+
+### UX
+- Added a live progress spinner during ingestion and analysis so the tool no longer appears frozen on long scans. Reports the active phase (identity, filesystem walk, execution contexts, capabilities, processes, path tracing) and a periodic file count during the filesystem walk. Renders to stderr so it does not pollute `--output json` / `--output markdown` redirects, and is suppressed automatically with `-v`/`-vv`, `--quiet`, or in non-TTY environments.
+- Added `--quiet` / `-q` to suppress the progress spinner unconditionally.
+
+## v1.0.3
+
+### Correctness
+- Handling for SUID_EXEC edges (reduced false flags)
+
 ## v1.0.2
 
 ### Hygiene
