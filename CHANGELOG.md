@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.2
+
+### Hygiene
+- Minor version control reconfiguration
+
 ## v1.0.1
 
 ### Security
