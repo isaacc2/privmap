@@ -213,6 +213,16 @@ def _dfs_find_paths(
                 if cmd != "ALL" and binary.lower() not in SUDO_SHELL_ESCAPE:
                     continue
 
+            # Special handling: SUID_EXEC edges only matter if the binary is
+            # actually exploitable (i.e. allows a shell escape per GTFOBins).
+            # Standard SUID binaries (passwd, sudo, mount, ssh-agent, etc.) are
+            # SUID by design and do not grant arbitrary code execution.
+            if edge.edge_type == EdgeType.SUID_EXEC:
+                binary_path = edge.properties.get("path", "")
+                binary_name = binary_path.rsplit("/", 1)[-1] if "/" in binary_path else binary_path
+                if binary_name.lower() not in GTFOBINS_SUID:
+                    continue
+
             path_nodes.append(neighbor)
             path_edges.append(edge)
             dfs(neighbor, path_nodes, path_edges, depth + 1)
