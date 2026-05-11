@@ -71,6 +71,7 @@ nav:
   - Usage:
       - Live analysis: usage/live-analysis.md
       - Snapshot mode: usage/snapshot-mode.md
+      - Penetration testing: usage/penetration-testing.md
       - CI/CD integration: usage/ci-integration.md
       - Output formats: usage/output-formats.md
   - Concepts:

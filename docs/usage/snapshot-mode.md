@@ -13,6 +13,10 @@ This is the standard workflow for:
   is out of policy.
 - Bulk analysis of many hosts from a central workstation.
 
+For penetration testing specifically (running the collector as an
+unprivileged user from a foothold, exfiltrating, analyzing locally),
+see the dedicated [penetration testing](penetration-testing.md) page.
+
 ## Collecting on the target
 
 The collector is shipped as `collect.sh` in the repository. It is a
