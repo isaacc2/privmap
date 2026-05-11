@@ -1,3 +1,7 @@
+<p align="left">
+  <img src="assets/logo.png" alt="privmap" width="220">
+</p>
+
 # privmap
 
 **Find Linux privilege escalation paths by modeling permissions as a graph.**

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.8
+
+### Documentation
+- Fixed broken README hero image. The v1.0.7 README pointed at `main/logo/logo.png`, but the `logo/` directory was removed before the v1.0.7 commit and the image only ships under `docs/assets/`. The README and PyPI project page now resolve the hero from `main/docs/assets/logo.png`.
+- Added the logo as a hero image on the docs site landing page (`docs/index.md`), matching the README placement.
+
+No code changes in this release.
+
 ## v1.0.7
 
 ### Branding

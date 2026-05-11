@@ -1,5 +1,5 @@
 <p align="left">
-  <img src="https://raw.githubusercontent.com/isaacc2/privmap/main/logo/logo.png" alt="privmap" width="220">
+  <img src="https://raw.githubusercontent.com/isaacc2/privmap/main/docs/assets/logo.png" alt="privmap" width="220">
 </p>
 
 [![tests](https://github.com/isaacc2/privmap/workflows/tests/badge.svg)](https://github.com/isaacc2/privmap/actions)
