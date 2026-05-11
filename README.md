@@ -1,10 +1,14 @@
-# privmap
+<p align="left">
+  <img src="https://raw.githubusercontent.com/isaacc2/privmap/main/logo/logo.png" alt="privmap" width="220">
+</p>
 
 [![tests](https://github.com/isaacc2/privmap/workflows/tests/badge.svg)](https://github.com/isaacc2/privmap/actions)
 [![PyPI version](https://badge.fury.io/py/privmap.svg)](https://pypi.org/project/privmap/)
 [![Documentation](https://readthedocs.org/projects/privmap/badge/?version=latest)](https://privmap.readthedocs.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/pypi/pyversions/privmap.svg)](https://pypi.org/project/privmap/)
+
+# privmap
 
 **Find Linux privilege escalation paths by modeling permissions as a graph.**
 

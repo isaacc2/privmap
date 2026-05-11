@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0.7
+
+### Branding
+- Added project logo. Rendered as a hero image at the top of the README (via absolute `raw.githubusercontent.com` URL so it also displays on the PyPI page), as the nav-bar logo on the MkDocs Material docs site, and as the browser-tab favicon. Source kept at `logo/logo.png`; downsized 192x192 favicon staged at `docs/assets/favicon.png`.
+
+### Testing
+- Added 90 new tests across four files, lifting coverage of security-critical and recently-changed code from minimal to substantive:
+    - `tests/test_safe_extract.py` (14 tests) pins down the tarfile path-traversal defenses in `cli._safe_extract_tar`: absolute path rejection, parent-directory traversal, escaping symlinks and hardlinks, special-file refusal, member-count and byte-size limits.
+    - `tests/test_command_parsing.py` (23 tests) covers cron and systemd command extraction, including env-var stripping, shell-segment splitting (`&&`, `||`, `;`, `|`), and that path arguments like `/etc` are not treated as executables.
+    - `tests/test_sudoers_parsing.py` (15 tests) regression-locks the v1.0.1 fixes: `NOPASSWD:` detected at tag position rather than substring, locked accounts (`!`, `!!`, `*`) not misclassified as empty-password, and correct runas resolution.
+    - `tests/test_traversal_filters.py` (38 tests) parametrizes over the `AUTH_REQUIRED_SUID`, `GTFOBINS_SUID`, and `KNOWN_SAFE_CAP_BINARIES` allowlists to lock in current filter behavior, plus sink and source predicate coverage.
+- Total test count is now 102 (was 12).
+
 ## v1.0.6
 
 ### Packaging
