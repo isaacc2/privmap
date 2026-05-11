@@ -1,0 +1,92 @@
+site_name: privmap
+site_description: Find Linux privilege escalation paths by modeling permissions as a graph.
+site_url: https://privmap.readthedocs.io/
+repo_url: https://github.com/isaacc2/privmap
+repo_name: isaacc2/privmap
+edit_uri: edit/main/docs/
+copyright: MIT licensed.
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - content.code.copy
+    - content.action.edit
+    - search.highlight
+    - search.suggest
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+plugins:
+  - search
+  - include-markdown
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Quickstart: quickstart.md
+  - Usage:
+      - Live analysis: usage/live-analysis.md
+      - Snapshot mode: usage/snapshot-mode.md
+      - CI/CD integration: usage/ci-integration.md
+      - Output formats: usage/output-formats.md
+  - Concepts:
+      - Graph model: concepts/graph-model.md
+      - Scoring & severity: concepts/scoring.md
+      - Path validation: concepts/path-validation.md
+  - Reference:
+      - CLI: reference/cli.md
+      - Architecture: reference/architecture.md
+      - Python API: reference/python-api.md
+  - Known limitations: limitations.md
+  - FAQ: faq.md
+  - Security policy: security.md
+  - Contributing: contributing.md
+  - Changelog: changelog.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/isaacc2/privmap
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/privmap/

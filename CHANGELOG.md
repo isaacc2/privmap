@@ -1,9 +1,24 @@
 # Changelog
 
+## v1.0.5
+
+### Documentation
+- Added a full documentation site built with MkDocs Material, hosted on Read the Docs at <https://privmap.readthedocs.io/>. Covers installation, quickstart, live and snapshot analysis modes, CI/CD integration, output formats, graph model, scoring, path validation, CLI reference, architecture, Python API, known limitations, FAQ, security policy, and contributing.
+- README rewritten as a focused project hook (badges, one-line description, install, quickstart, links to the docs site) rather than as the primary manual. Deep content lives in the docs.
+- Reworded the package short description from "Linux privilege graph engine - model effective access, trace escalation paths." to "Find Linux privilege escalation paths by modeling permissions as a graph."
+
+### Packaging
+- Added a `docs` extras group: `pip install -e ".[docs]"` installs `mkdocs`, `mkdocs-material`, `mkdocs-include-markdown-plugin`, and `pymdown-extensions`.
+- Added `[project.urls]` metadata for Homepage, Documentation, Repository, Issues, and Changelog. These surface as clickable links on the PyPI page.
+- Added a `.readthedocs.yaml` build config so RTD builds are reproducible and the docs deps stay in sync with the project.
+
+### Python API
+- `privmap/__init__.py` now re-exports the stable public API: `GraphBuilder`, `PrivilegeGraph`, `Node`, `NodeType`, `Edge`, `EdgeType`, `EscalationPath`, `Severity`, `analyze_paths`, `export_json`, `export_markdown`, `__version__`. Programmatic users can now write `from privmap import GraphBuilder, analyze_paths`.
+
 ## v1.0.4
 
 ### Correctness
-- Auth-required SUID binaries (`su`, `pkexec`, `sudo`, `doas`, `passwd`, `chsh`, `mount`, `ssh-agent`, etc.) are no longer reported as free escalation paths. They are SUID by design and gate access behind a credential prompt; flagging them produced a critical-severity finding for every user on every system. Specific CVEs against these binaries (e.g. PwnKit) are out of scope — privmap does not do version-based CVE matching.
+- Auth-required SUID binaries (`su`, `pkexec`, `sudo`, `doas`, `passwd`, `chsh`, `mount`, `ssh-agent`, etc.) are no longer reported as free escalation paths. They are SUID by design and gate access behind a credential prompt; flagging them produced a critical-severity finding for every user on every system. Specific CVEs against these binaries (e.g. PwnKit) are out of scope; privmap does not do version-based CVE matching.
 - An unreadable `/var/spool/cron/crontabs` (mode `0730 root:crontab` on Debian-family systems) no longer crashes the run. Now logs a warning and continues with a partial scan.
 
 ### UX
@@ -40,7 +55,7 @@
 - Removed duplicated `KNOWN_SAFE_CAP_BINARIES` set; canonical version now lives in the capabilities module.
 - JSON export `version` field now sources from `privmap.__version__` instead of a hardcoded duplicate.
 
-## v1.0.0 — Initial release
+## v1.0.0 - Initial release
 
 - Graph-based privilege escalation analysis for Linux
 - Ingestion modules: identity (passwd, group, shadow, sudoers with alias support), filesystem (SUID/SGID, world-writable, ACLs, symlinks), execution (cron, systemd, init.d), capabilities, processes

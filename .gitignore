@@ -13,3 +13,6 @@ build/
 venv/
 privmap_snapshot_*/
 .vscode/
+
+# MkDocs build output
+/site/
