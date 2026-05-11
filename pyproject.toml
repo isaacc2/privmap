@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "privmap"
-version = "1.0.5"
+version = "1.0.6"
 description = "Find Linux privilege escalation paths by modeling permissions as a graph."
 readme = "README.md"
 license = {text = "MIT"}
@@ -13,6 +13,24 @@ dependencies = [
     "networkx>=3.0",
     "rich>=13.0",
 ]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: System :: Systems Administration",
+]
+keywords = ["security", "linux", "privilege-escalation", "graph", "pentesting", "hardening"]
 
 [project.urls]
 Homepage = "https://github.com/isaacc2/privmap"

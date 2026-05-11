@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.6
+
+### Packaging
+- Added PyPI trove classifiers (Development Status, Intended Audience, License, Operating System, Python versions 3.8 to 3.13, Topic). These power PyPI's sidebar filters and search, and unblock the `pyversions` shield on the README which previously displayed "missing" because shields.io reads classifiers, not `requires-python`.
+- Added `keywords` to package metadata (`security`, `linux`, `privilege-escalation`, `graph`, `pentesting`, `hardening`) to improve PyPI search discoverability.
+
+No code changes in this release.
+
 ## v1.0.5
 
 ### Documentation
