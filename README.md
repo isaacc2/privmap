@@ -73,8 +73,7 @@ target host.
 
 privmap is a **structural** analysis tool for local Linux privilege
 relationships. It does not perform network enumeration, run exploits, cover
-Windows or macOS, or match binary versions against a CVE database. Pair it
-with a vulnerability scanner for full coverage.
+Windows or macOS, or match binary versions against a CVE database.
 
 ## Use cases
 
