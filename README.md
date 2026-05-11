@@ -36,6 +36,10 @@ Where flat-list scanners like LinPEAS report *"this file is world-writable"*
 and *"this cron job runs as root"* as separate observations, privmap connects
 them into the single chain that actually represents the escalation.
 
+## Documentation
+
+See full documentation at **<https://privmap.readthedocs.io/>**.
+
 ## Install
 
 ```bash
@@ -64,17 +68,6 @@ privmap --snapshot ./privmap_snapshot_target_20260507.tar.gz        # on analyst
 
 The collector is POSIX-compliant and has no runtime dependencies on the
 target host.
-
-## Documentation
-
-Full documentation lives at **<https://privmap.readthedocs.io/>**. Start with
-the [quickstart](https://privmap.readthedocs.io/en/latest/quickstart/), or
-jump straight to the
-[graph model](https://privmap.readthedocs.io/en/latest/concepts/graph-model/),
-[CLI reference](https://privmap.readthedocs.io/en/latest/reference/cli/),
-[scoring rules](https://privmap.readthedocs.io/en/latest/concepts/scoring/),
-[CI/CD integration](https://privmap.readthedocs.io/en/latest/usage/ci-integration/),
-or [known limitations](https://privmap.readthedocs.io/en/latest/limitations/).
 
 ## Scope
 
