@@ -1,4 +1,4 @@
-"""Core graph data model — nodes, edges, and the privilege graph."""
+"""Core graph data model - nodes, edges, and the privilege graph."""
 from __future__ import annotations
 
 import enum
@@ -22,6 +22,24 @@ class NodeType(enum.Enum):
     SUID_BINARY = "suid_binary"
     CAPABILITY = "capability"
 
+    # v2.0 additions
+    PROFILE_SCRIPT = "profile_script"     # /etc/profile.d/*, /etc/bash.bashrc, /etc/profile
+    LDPRELOAD_FILE = "ldpreload_file"     # /etc/ld.so.preload, /etc/ld.so.conf, conf.d/*
+    POLKIT_RULE = "polkit_rule"           # /etc/polkit-1/rules.d/*, /usr/share/polkit-1/rules.d/*
+    PAM_FILE = "pam_file"                 # /etc/pam.d/*
+    SSH_KEY = "ssh_key"                   # authorized_keys, host keys, private keys
+    NFS_EXPORT = "nfs_export"             # entries from /etc/exports
+    CONTAINER_MARKER = "container_marker" # signals execution context (docker, lxc, k8s)
+    NETWORK_LISTENER = "network_listener" # bound ports
+    PATH_DIR = "path_dir"                 # directory on $PATH
+    LOGIN_HOOK = "login_hook"             # /etc/skel/*, .bashrc-class files
+    DOAS_RULE = "doas_rule"               # /etc/doas.conf entries
+    SECRET_FINDING = "secret_finding"     # credentials surfaced (env vars, config strings)
+    DBUS_POLICY = "dbus_policy"           # /etc/dbus-1/system.d/*.conf rules
+    INETD_SERVICE = "inetd_service"       # /etc/inetd.conf, /etc/xinetd.d/*
+    APPARMOR_PROFILE = "apparmor_profile" # /etc/apparmor.d/*
+    MOUNT = "mount"                       # entries from /proc/mounts (bind mounts, etc.)
+
 
 class EdgeType(enum.Enum):
     MEMBER_OF = "MEMBER_OF"
@@ -35,6 +53,13 @@ class EdgeType(enum.Enum):
     WRITABLE_BY = "WRITABLE_BY"
     HAS_CAPABILITY = "HAS_CAPABILITY"
     SUID_EXEC = "SUID_EXEC"
+
+    # v2.0 additions
+    EXECUTED_AT_LOGIN = "EXECUTED_AT_LOGIN"   # script -> user (the user whose login triggers it)
+    INFLUENCES_EXEC = "INFLUENCES_EXEC"       # config/preload -> binary/process whose behavior it changes
+    LISTENS_ON = "LISTENS_ON"                 # process -> network_listener
+    TRUSTS = "TRUSTS"                          # host trust (hosts.equiv, .rhosts)
+    EXPOSES = "EXPOSES"                       # process -> secret_finding (cred exposure)
 
 
 class Severity(enum.Enum):

@@ -6,12 +6,18 @@
 
 **Find Linux privilege escalation paths by modeling permissions as a graph.**
 
-privmap reads system configuration (users, groups, sudo rules, file
-permissions, cron jobs, systemd units, capabilities, running processes) and
-builds a directed property graph. It then runs reachability analysis from
-each non-privileged principal toward high-value sinks such as root,
-dangerous capabilities, and sudo `ALL` rules. The report lists the actual
-sequence of relationships that lets a user reach a sink.
+privmap reads system configuration (users, groups, sudo and doas rules,
+file permissions including group-writable, cron jobs, systemd units,
+init.d scripts, inetd and xinetd services, capabilities, running processes,
+login scripts, dynamic linker control files, polkit and PAM stacks, SSH
+keys and configuration, NFS exports and fstab options, host-trust files,
+listening ports, container markers and writable bind mounts, $PATH
+directories, AppArmor profiles, D-Bus policies) and builds a directed
+property graph. It then runs reachability analysis from each
+non-privileged principal toward high-value sinks such as root, dangerous
+capabilities, sudo `ALL` rules, doas root rules, and container breakout
+markers. The report lists the actual sequence of relationships that lets
+a user reach a sink.
 
 ```text
 [CRITICAL] 2 escalation paths found for user: www-data

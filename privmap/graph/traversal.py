@@ -38,7 +38,7 @@ GTFOBINS_SUID = {
 # prompt (the user's own password, the target user's password, PAM, etc.).
 # These should not be reported as free escalation paths just because they
 # exist on the system. Specific CVEs against these binaries (e.g. PwnKit
-# against pkexec) are out of scope here — privmap does not do version-based
+# against pkexec) are out of scope here - privmap does not do version-based
 # CVE matching; use a vulnerability scanner alongside it.
 AUTH_REQUIRED_SUID = {
     "su", "sudo", "doas",
@@ -74,13 +74,23 @@ def is_sink_node(node: Node) -> bool:
         cmd = node.properties.get("command", "")
         if cmd == "ALL":
             return True
+    if node.node_type == NodeType.DOAS_RULE:
+        if (
+            node.properties.get("action") == "permit"
+            and node.properties.get("target") == "root"
+            and node.properties.get("command", "ALL") == "ALL"
+        ):
+            return True
     if node.node_type == NodeType.CAPABILITY:
         cap_name = node.name.lower()
         if cap_name in DANGEROUS_CAPABILITIES:
-            # Check if this cap is on a known-safe binary — if so, not a real sink
+            # Check if this cap is on a known-safe binary - if so, not a real sink
             binary_name = node.properties.get("binary_name", "")
             if binary_name in KNOWN_SAFE_CAP_BINARIES:
                 return False
+            return True
+    if node.node_type == NodeType.CONTAINER_MARKER:
+        if node.properties.get("breakout_artifacts"):
             return True
     return False
 
@@ -102,7 +112,7 @@ def _is_known_safe_cap_path(path_nodes: List[Node]) -> bool:
     """Check if a path traverses a known-safe capability binary.
 
     Returns True if the path contains a file node for a binary in the
-    known-safe list followed by a capability node — indicating the path
+    known-safe list followed by a capability node - indicating the path
     relies on caps that aren't actually exploitable.
     """
     for i, node in enumerate(path_nodes):
@@ -117,6 +127,18 @@ def _is_known_safe_cap_path(path_nodes: List[Node]) -> bool:
     return False
 
 
+# Edge types that constitute "executional context" for the purpose of
+# validating CAN_WRITE chains. A writable target with any of these edges
+# (inbound or outbound) is part of a real execution path; without any of
+# them, writing the file accomplishes nothing privileged.
+_EXEC_CONTEXT_EDGES = {
+    EdgeType.EXECUTES,
+    EdgeType.RUNS_AS,
+    EdgeType.EXECUTED_AT_LOGIN,
+    EdgeType.INFLUENCES_EXEC,
+}
+
+
 def _validate_write_execute_chain(
     graph: PrivilegeGraph, path_nodes: List[Node], path_edges: List[Edge]
 ) -> bool:
@@ -124,18 +146,19 @@ def _validate_write_execute_chain(
     for i, edge in enumerate(path_edges):
         if edge.edge_type == EdgeType.CAN_WRITE:
             target_id = edge.target_id
-            # Check if this writable resource is executed by something privileged
-            inbound_exec = graph.get_inbound_edges(target_id, EdgeType.EXECUTES)
+            inbound_exec = [
+                e for e in graph.get_edges_to(target_id)
+                if e.edge_type in _EXEC_CONTEXT_EDGES
+            ]
             outbound_from_target = graph.get_edges_from(target_id)
             has_exec_context = (
                 len(inbound_exec) > 0
-                or any(e.edge_type == EdgeType.EXECUTES for e in outbound_from_target)
-                or any(e.edge_type == EdgeType.RUNS_AS for e in outbound_from_target)
+                or any(e.edge_type in _EXEC_CONTEXT_EDGES for e in outbound_from_target)
             )
-            # Also valid if next edge in path is EXECUTES or RUNS_AS
+            # Also valid if next edge in path is an execution-context edge.
             if i + 1 < len(path_edges):
                 next_edge = path_edges[i + 1]
-                if next_edge.edge_type in (EdgeType.EXECUTES, EdgeType.RUNS_AS):
+                if next_edge.edge_type in _EXEC_CONTEXT_EDGES:
                     has_exec_context = True
             if not has_exec_context:
                 return False
@@ -225,7 +248,7 @@ def _dfs_find_paths(
                 continue
 
             # Special handling: GRANTS edges originating from sudo rule nodes.
-            # Only filter when the source is actually a SUDO_RULE — GRANTS edges
+            # Only filter when the source is actually a SUDO_RULE - GRANTS edges
             # from users (user -> sudo_rule) and capabilities should pass through.
             if edge.edge_type == EdgeType.GRANTS and current.node_type == NodeType.SUDO_RULE:
                 cmd = current.properties.get("command", "")
@@ -237,7 +260,7 @@ def _dfs_find_paths(
             # actually exploitable (i.e. allows a shell escape per GTFOBins).
             # Standard SUID binaries (passwd, sudo, mount, ssh-agent, su,
             # pkexec, etc.) are SUID by design and gate access behind a
-            # credential prompt — they aren't free escalation paths.
+            # credential prompt - they aren't free escalation paths.
             if edge.edge_type == EdgeType.SUID_EXEC:
                 binary_path = edge.properties.get("path", "")
                 binary_name = (

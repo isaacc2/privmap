@@ -43,7 +43,7 @@ def render_cli(
     console.print()
     console.print(
         Panel.fit(
-            "[bold]privmap[/bold] — Linux Privilege Graph Engine",
+            "[bold]privmap[/bold] - Linux Privilege Graph Engine",
             border_style="blue",
         )
     )
@@ -120,7 +120,7 @@ def _render_path(console: Console, index: int, path: EscalationPath) -> None:
     color = SEVERITY_COLORS.get(sev, "")
 
     console.print(
-        f"  [{color}]{sev.value}[/{color}] Path {index} — "
+        f"  [{color}]{sev.value}[/{color}] Path {index} - "
         f"{path.source.name} → {path.sink.name} "
         f"({path.hop_count} hop{'s' if path.hop_count != 1 else ''})"
     )
@@ -137,10 +137,16 @@ def _render_path(console: Console, index: int, path: EscalationPath) -> None:
                 props.append(f"mode: {target_node.properties['mode']}")
             if target_node.properties.get("run_as"):
                 props.append(f"runs-as: {target_node.properties['run_as']}")
-            if edge.properties.get("nopasswd"):
+            if target_node.properties.get("service"):
+                props.append(f"service: {target_node.properties['service']}")
+            if target_node.properties.get("group"):
+                props.append(f"group: {target_node.properties['group']}")
+            if edge.properties.get("nopasswd") or edge.properties.get("nopass"):
                 props.append("NOPASSWD")
             if edge.properties.get("reason"):
                 props.append(edge.properties["reason"])
+            if edge.properties.get("mechanism"):
+                props.append(edge.properties["mechanism"])
             if props:
                 detail += f"  [dim]({', '.join(props)})[/dim]"
             tree.add(f"{edge_label}  {detail}")

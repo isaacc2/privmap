@@ -16,13 +16,25 @@ but nothing runs it as anyone special.
 The check, implemented in
 `privmap.graph.traversal._validate_write_execute_chain`:
 
-> For every `CAN_WRITE` edge in the path, require either:
+> For every `CAN_WRITE` edge in the path, require an inbound or
+> outbound edge of one of the following types on the target node,
+> **or** the very next hop in the path itself being one of these
+> types:
 >
-> 1. A direct inbound `EXECUTES` edge on the target node, or
-> 2. An outbound `EXECUTES` or `RUNS_AS` edge from the target node, or
-> 3. The very next hop in the path is `EXECUTES` or `RUNS_AS`.
+> - `EXECUTES` (a cron, systemd unit, or init.d script runs the file)
+> - `RUNS_AS` (the file is itself an execution context)
+> - `EXECUTED_AT_LOGIN` (the file is sourced at user login)
+> - `INFLUENCES_EXEC` (the file is a config arg, ld.so preload,
+>   polkit rule, PAM stack, or NFS export that controls privileged
+>   execution)
 
 If none of those hold, the path is dropped.
+
+The `EXECUTED_AT_LOGIN` and `INFLUENCES_EXEC` types were added in v2.0
+to support chains like "writable `/etc/profile.d/foo.sh` is sourced
+when root logs in" and "writable `/etc/logrotate.d/myapp` is invoked
+by root cron via `logrotate /etc/logrotate.d/myapp`." Both are real
+escalation paths and both require these edge types to close.
 
 ## The known-safe capability binary filter
 

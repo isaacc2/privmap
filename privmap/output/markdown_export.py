@@ -13,7 +13,7 @@ def export_markdown(
 ) -> str:
     """Generate a Markdown report of escalation paths."""
     lines = []
-    lines.append("# privmap — Privilege Escalation Report\n")
+    lines.append("# privmap - Privilege Escalation Report\n")
 
     # Summary
     lines.append("## Summary\n")
@@ -48,7 +48,7 @@ def export_markdown(
         for i, path in enumerate(user_paths, 1):
             sev = path.severity.value if path.severity else "UNKNOWN"
             lines.append(
-                f"### Path {i} — `{path.source.name}` → `{path.sink.name}` "
+                f"### Path {i} - `{path.source.name}` → `{path.sink.name}` "
                 f"({path.hop_count} hops) [{sev}]\n"
             )
 

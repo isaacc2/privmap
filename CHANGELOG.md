@@ -1,5 +1,68 @@
 # Changelog
 
+## v2.0.0
+
+A major release bridging the LinPEAS coverage gap. Adds 16 new node types, 5 new edge types, 11 new ingester modules, and a corresponding expansion of `collect.sh`. Existing JSON consumers continue to work; the `version` field in JSON output now reads `2.0.0`.
+
+### New ingesters
+- **boot.py**: login-time scripts (`/etc/profile`, `/etc/profile.d/*`, `/etc/bash.bashrc`, `/etc/skel/*`), library-loading control (`/etc/ld.so.preload`, `/etc/ld.so.conf`, `/etc/ld.so.conf.d/*`), polkit rules (`/etc/polkit-1/rules.d/*`, `/usr/share/polkit-1/rules.d/*`). Each script and config file becomes a node; writability emits `CAN_WRITE` from the appropriate principals and the script emits `EXECUTED_AT_LOGIN` or `INFLUENCES_EXEC` to root, so the graph traversal can find chains like `unprivileged user -> CAN_WRITE -> /etc/profile.d/foo.sh -> EXECUTED_AT_LOGIN -> root`.
+- **auth.py**: doas configuration (`/etc/doas.conf`) with full rule parsing and `nopass` flag detection; sudo version capture (no CVE matching, just the version string); sudoers file *permissions* (writable `/etc/sudoers` or `/etc/sudoers.d/*` is its own immediate path to root); `/etc/security/*` (PAM-adjacent limits and access controls).
+- **ssh.py**: `sshd_config` risky-setting detection (`PermitRootLogin yes`, `PasswordAuthentication yes`, `PermitEmptyPasswords yes`); host key file permissions (`/etc/ssh/ssh_host_*_key` should be 0600 root:root); per-user `~/.ssh/authorized_keys` and `id_*` keys with writability flagged as `INFLUENCES_EXEC` to that user.
+- **network.py**: NFS exports (`/etc/exports`) with `no_root_squash` / `no_all_squash` detection; fstab (`/etc/fstab`) `nosuid`-missing on `/tmp`/`/home` and `no_root_squash` on NFS mounts; r-command host trust (`/etc/hosts.equiv`, `~/.rhosts`); `/etc/hosts` writability; listening TCP/UDP ports parsed from `/proc/net/{tcp,tcp6,udp,udp6}` with inode-to-pid resolution in live mode.
+- **container.py**: detects whether the analyzed system is running inside a container (Docker, Podman, LXC, Kubernetes) via `/.dockerenv`, `/run/.containerenv`, `/proc/1/cgroup` patterns. Flags container-breakout artifacts (Docker socket inside the container, full effective capabilities on PID 1).
+- **secrets.py**: scans `/proc/[pid]/environ` for processes exposing credentials via standard env-var keys (PASSWORD, TOKEN, API_KEY, AWS_SECRET, DATABASE_URL, etc.) and emits a `SECRET_FINDING` node with an `EXPOSES` edge from the owning process.
+- **path_abuse.py**: parses `$PATH` from `/etc/environment` and `/etc/login.defs`. Each PATH directory becomes a `PATH_DIR` node; the walker flags writable shell scripts on PATH, broken symlinks on PATH, and PATH dirs writable by non-root.
+- **pam.py**: parses `/etc/pam.d/*` and flags `pam_rootok.so` on services other than `su`/`sudo`, `pam_permit.so`, `nullok` on `pam_unix.so`, and `pam_wheel.so` without explicit `group=` restriction. Writability of PAM files is also flagged.
+
+### Graph model
+- 12 new `NodeType` values: `PROFILE_SCRIPT`, `LDPRELOAD_FILE`, `POLKIT_RULE`, `PAM_FILE`, `SSH_KEY`, `NFS_EXPORT`, `CONTAINER_MARKER`, `NETWORK_LISTENER`, `PATH_DIR`, `LOGIN_HOOK`, `DOAS_RULE`, `SECRET_FINDING`.
+- 5 new `EdgeType` values: `EXECUTED_AT_LOGIN`, `INFLUENCES_EXEC`, `LISTENS_ON`, `TRUSTS`, `EXPOSES`.
+- Sinks now include `DOAS_RULE` with target=root, and `CONTAINER_MARKER` with breakout artifacts present.
+
+### Filesystem detection
+- **Group-writable files** are now first-class. The walk emits `CAN_WRITE` from each user in the file's group, with proper sticky-bit suppression. This closes the most common privmap blind spot (e.g. a logrotate config owned `root:adm` mode 0664 with wwwdev in the adm group is now correctly flagged).
+- New snapshot inputs: `suid/group_writable_files.txt` and `suid/group_writable_dirs.txt` (format: `mode owner group path`). The new `collect.sh` produces these.
+
+### Execution-arg semantics
+- Cron and systemd command parsers now emit `INFLUENCES_EXEC` edges from config-file path arguments back to the running cron/unit. A cron entry like `/usr/sbin/logrotate /etc/logrotate.d/myapp` now produces an edge `file:/etc/logrotate.d/myapp -INFLUENCES_EXEC-> cron:...` so a writable config in `/etc/*.d/` chains correctly through the privileged execution.
+- Cron periodic-dir parser (`/etc/cron.{daily,hourly,weekly,monthly}/*`) now reads each script's content for the same analysis, so chains like the v1 demo (`wwwdev -> adm -> /etc/logrotate.d/myapp -> /etc/cron.daily/myapp-logs -> root`) close end-to-end.
+
+### Collector
+- `collect.sh` v2 gathers group-writable files, login-time scripts, ld.so configuration, polkit rules, doas config, sudo version, PAM files, `/etc/security`, sshd_config + host key metadata, NFS exports, fstab, host-trust files, `/etc/hosts`, `/proc/net/tcp[6]` and `/proc/net/udp[6]`, container markers, `/proc/1/cgroup`, and per-process environ at `/proc/[pid]/environ.txt`. All files land at their natural target-system paths under `OUTDIR/`, so ingesters work identically in live and snapshot mode.
+
+### Scoring and remediation
+- Scoring axes extended with `EXECUTED_AT_LOGIN` (waiting penalty similar to cron) and `INFLUENCES_EXEC` (small situational penalty) factors. Doas `nopass` treated like sudo `nopasswd`.
+- Remediation now emits specific commands for group-writable, owner-writable, EXECUTED_AT_LOGIN, INFLUENCES_EXEC, TRUSTS, and EXPOSES findings.
+
+### Expansion (Batches K-R)
+- **Sudo tokens**: enumerates `/var/run/sudo/ts/` and `/var/db/sudo/ts/`. Active timestamps are recorded as `active_sudo_token` property on the corresponding user node.
+- **Kerberos ticket files**: scans `/tmp/krb5cc_*` and `/var/tmp/krb5cc_*`. Overly-readable cache files emit `INFLUENCES_EXEC` to the ticket's owner.
+- **`/etc/profile` PATH manipulation detection**: flags login scripts that prepend `.`, `~`, or an empty entry to `$PATH`.
+- **D-Bus policy analysis** (`dbus.py`): parses XML in `/etc/dbus-1/system.d/*.conf` and `/usr/share/dbus-1/system.d/*.conf`. Flags policies that grant `<allow send_destination="..."/>` without a method restriction, or `own="..."` to a non-root principal. Emits `INFLUENCES_EXEC` for over-permissive policies.
+- **Systemd PATH overrides**: extracts `Environment="PATH=..."` from unit files. When the unit runs as root and invokes binaries by unqualified name, the override is part of the chain.
+- **Wildcard injection detection**: flags cron and systemd commands invoking `tar`, `rsync`, `chmod`, `chown`, `7z`, `zip`, `scp` with an unquoted `*` in argv. Property `wildcard_injection_risk` lands on the `CRON_JOB` / `SYSTEMD_UNIT` node.
+- **Inetd / xinetd services** (`inetd.py`): parses `/etc/inetd.conf` and `/etc/xinetd.d/*`. Each enabled service becomes an `INETD_SERVICE` node with `RUNS_AS` and `EXECUTES` edges, same shape as systemd units.
+- **AppArmor profiles** (`apparmor.py`): enumerates `/etc/apparmor.d/*`, captures profile state from `/sys/kernel/security/apparmor/profiles`. Flags profiles in complain mode and writable profile files.
+- **Container writable bind mounts**: extends `container.py` to parse `/proc/mounts` and flag writable bind mounts on `/host`, `/mnt`, `/var/lib`, or `/` that lack `nosuid`. Emits `MOUNT` nodes with `INFLUENCES_EXEC` to root.
+
+### Chain wiring for previously-orphan node types
+- **`PATH_DIR` integration**: when a cron job or systemd unit invokes a binary by unqualified name, every `PATH_DIR` node now emits `INFLUENCES_EXEC` to that cron/unit. Combined with the existing CAN_WRITE machinery, a writable `/usr/local/bin` becomes a real escalation chain to any root cron using unqualified commands.
+- **`PATH_DIR` writability**: `path_abuse.py` now emits its own `CAN_WRITE` edges from the appropriate principals when a PATH directory is world- or group-writable, instead of relying solely on the filesystem ingester (which doesn't know about PATH semantics).
+- **`SSH_KEY` `authorized_keys` chain**: writability of root's `~/.ssh/authorized_keys` now closes a chain from writer → key file → root via the existing `INFLUENCES_EXEC` to target user. (The edge was emitted in the initial v2 batch, but no test verified the chain closed end-to-end. There is now a test for that.)
+
+### New node types (16)
+`PROFILE_SCRIPT`, `LDPRELOAD_FILE`, `POLKIT_RULE`, `PAM_FILE`, `SSH_KEY`, `NFS_EXPORT`, `CONTAINER_MARKER`, `NETWORK_LISTENER`, `PATH_DIR`, `LOGIN_HOOK`, `DOAS_RULE`, `SECRET_FINDING`, `DBUS_POLICY`, `INETD_SERVICE`, `APPARMOR_PROFILE`, `MOUNT`.
+
+### Tests
+- 39 new tests across `tests/test_v2_ingesters.py` (20) and `tests/test_v2_expansion.py` (19), covering every new ingester plus chain-wiring integration tests. The full demo chain (group-writable logrotate config + root cron invoking logrotate against it) now has a dedicated end-to-end test that verifies `find_escalation_paths` produces at least one path. **Total test count: 141 (was 102 in v1.0.8).**
+
+### Known gaps (deliberately out of scope)
+- Application-specific config-file secret scanning (100+ check categories in LinPEAS). Use `gitleaks`, `trufflehog`, or similar.
+- Cloud metadata enumeration (AWS IMDS, GCP metadata, Azure IMDS). Requires network egress, which privmap does not do.
+- CVE matching against captured binary versions. Pair with `trivy`, `grype`, or a CVE-aware scanner.
+- Browser data, mail spools, password searches in shell history. Out of scope.
+- Deep D-Bus method semantics, full sudoers grammar, full PAM stack evaluation. All best-effort.
+
 ## v1.0.8
 
 ### Documentation

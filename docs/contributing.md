@@ -1,8 +1,7 @@
 # Contributing
 
-Thanks for considering a contribution to privmap. This page covers the
-practicalities. For the bigger picture see
-[Architecture](reference/architecture.md).
+Thanks for considering a contribution to privmap. For the 
+bigger picture see [Architecture](reference/architecture.md).
 
 ## Development setup
 

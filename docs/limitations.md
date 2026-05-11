@@ -1,21 +1,39 @@
 # Known limitations
 
-privmap is honest about where it is best-effort. This page enumerates
-the classes of finding where you should interpret the report with care.
+This page enumerates the classes of finding where you should 
+interpret the report with care.
 
 ## Scope
 
-privmap analyses local Linux privilege relationships. It explicitly
-does not:
+privmap analyses local Linux privilege relationships. As of v2.0 it
+covers 35 distinct check categories spanning identity, filesystem
+permissions (including group-writable, sticky-suppressed), execution
+contexts (cron + systemd with config-argument and unqualified-binary
+chains), capabilities, login-time scripts, library loading,
+authentication (sudo, doas, PAM, polkit), SSH, network surfaces
+(NFS exports, fstab, hosts.equiv, listeners), container detection
+(Docker, LXC, k8s, writable bind mounts), PATH abuse, D-Bus policies,
+legacy super-servers (inetd, xinetd), and AppArmor.
+
+It explicitly does **not**:
 
 - Perform network enumeration or remote service fingerprinting.
+  Listening ports are recorded but reachability is not probed.
 - Run exploits or attempt actual privilege escalation.
 - Cover Windows or macOS.
-- Match installed binary versions against a CVE database.
-- Inspect kernel exploits, container escapes, or hypervisor flaws.
+- Match installed binary versions against a CVE database. Pair with
+  `trivy`, `grype`, or your distribution's vulnerability scanner.
+- Scan application configuration files for embedded credentials
+  (Apache, MySQL, Tomcat, etc.; there are ~100 such checks in
+  LinPEAS). This overlaps with `gitleaks` and `trufflehog`.
+- Query cloud metadata services (AWS IMDS, GCP, Azure). Requires
+  network egress, which privmap does not do.
+- Inspect kernel exploits, container escapes from a non-root context,
+  or hypervisor flaws.
+- Read user shell history, mail spools, or browser data.
 
-It is a structural analysis tool. Pair it with a vulnerability scanner
-and a network mapper for full coverage.
+It is a structural analysis tool. Pair it with a vulnerability scanner,
+a secret scanner, and a network mapper for full coverage.
 
 ## Argument-restricted sudo rules
 

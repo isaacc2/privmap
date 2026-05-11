@@ -43,6 +43,18 @@ working directory. The script collects:
 - Systemd units from the standard search paths
 - `/etc/init.d` scripts
 - Running process metadata from `/proc/*/status` and `/proc/*/cmdline`
+- Group-writable file/directory listings (since v2.0)
+- Login-time scripts: `/etc/profile`, `/etc/profile.d/*`,
+  `/etc/bash.bashrc`, `/etc/skel/*` (v2.0)
+- Library-loading control: `/etc/ld.so.preload`, `/etc/ld.so.conf`,
+  `/etc/ld.so.conf.d/*` (v2.0)
+- Polkit JS rules from `/etc/polkit-1/rules.d` and the system path (v2.0)
+- doas configuration, sudo version string, PAM stack files, `/etc/security/*` (v2.0)
+- SSH configuration: `sshd_config` and host-key metadata (v2.0)
+- NFS exports, fstab, hosts.equiv, `/etc/hosts` (v2.0)
+- `/proc/net/{tcp,tcp6,udp,udp6}` for listener enumeration (v2.0)
+- Container markers: `/.dockerenv`, `/proc/1/cgroup` (v2.0)
+- Per-process environment at `/proc/[pid]/environ.txt` (v2.0)
 
 Transfer the archive over whatever channel is appropriate (scp, removable
 media, and so on).

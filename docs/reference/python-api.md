@@ -130,8 +130,9 @@ These are stable across patch and minor releases within the 1.x line:
 - All identifiers listed in [Top-level imports](#top-level-imports).
 - `GraphBuilder.__init__` keyword arguments.
 - `analyze_paths` signature and return type.
-- `NodeType` and `EdgeType` enum values. New values may be added;
-  existing values are not removed or renamed.
+- `NodeType` and `EdgeType` enum values. New values may be added (v2.0
+  added 16 node types and 5 edge types; see [graph model](../concepts/graph-model.md));
+  existing values are not removed or renamed within a major version.
 - `EscalationPath` attributes used in the examples above.
 - The `__version__` string.
 

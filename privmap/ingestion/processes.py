@@ -110,7 +110,7 @@ class ProcessIngester:
             )
             graph.add_node(proc_node)
 
-            # RUNS_AS edge — process runs as effective UID user
+            # RUNS_AS edge - process runs as effective UID user
             if effective_uid == 0:
                 root_node = graph.get_node("user:root")
                 if root_node:

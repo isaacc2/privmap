@@ -12,19 +12,35 @@ This page is the canonical reference for what nodes and edges mean.
 A node represents an entity that can either hold privilege or be used to
 gain privilege.
 
-| Node type        | Represents                                                                          |
-|------------------|-------------------------------------------------------------------------------------|
-| `USER`           | A line in `/etc/passwd`. Uid, primary gid, shell, home, gecos.                      |
-| `GROUP`          | A line in `/etc/group`. Gid, member list (handled via edges).                       |
-| `SUDO_RULE`      | A single command spec parsed from `/etc/sudoers` or `/etc/sudoers.d/*`.             |
-| `FILE`           | A regular file flagged by some ingester (writable, ACL-relevant, executed, etc.).   |
-| `DIRECTORY`      | A directory flagged by some ingester (typically world-writable).                    |
-| `SUID_BINARY`    | A file with SUID or SGID set.                                                       |
-| `CRON_JOB`       | A cron entry (system or user crontab, periodic cron drop-in).                       |
-| `SYSTEMD_UNIT`   | A `.service` or `.timer` unit file.                                                 |
-| `INITD_SCRIPT`   | An `/etc/init.d` script.                                                            |
-| `CAPABILITY`     | A specific Linux capability bound to a specific binary (`cap_setuid` on `/foo`).    |
-| `PROCESS`        | A non-root process with elevated effective capabilities.                            |
+| Node type          | Represents                                                                                |
+|--------------------|-------------------------------------------------------------------------------------------|
+| `USER`             | A line in `/etc/passwd`. Uid, primary gid, shell, home, gecos.                            |
+| `GROUP`            | A line in `/etc/group`. Gid, member list (handled via edges).                             |
+| `SUDO_RULE`        | A single command spec parsed from `/etc/sudoers` or `/etc/sudoers.d/*`.                   |
+| `DOAS_RULE`        | A line from `/etc/doas.conf`.                                                             |
+| `FILE`             | A regular file flagged by some ingester (writable, ACL-relevant, executed, etc.).         |
+| `DIRECTORY`        | A directory flagged by some ingester (typically world-writable).                          |
+| `SUID_BINARY`      | A file with SUID or SGID set.                                                             |
+| `CRON_JOB`         | A cron entry (system or user crontab, periodic cron drop-in).                             |
+| `SYSTEMD_UNIT`     | A `.service` or `.timer` unit file.                                                       |
+| `INITD_SCRIPT`     | An `/etc/init.d` script.                                                                  |
+| `CAPABILITY`       | A specific Linux capability bound to a specific binary (`cap_setuid` on `/foo`).          |
+| `PROCESS`          | A non-root process with elevated effective capabilities.                                  |
+| `PROFILE_SCRIPT`   | `/etc/profile`, `/etc/bash.bashrc`, `/etc/profile.d/*`. Executed at interactive login.    |
+| `LDPRELOAD_FILE`   | `/etc/ld.so.preload`, `/etc/ld.so.conf`, `/etc/ld.so.conf.d/*`. Loaded into every binary. |
+| `POLKIT_RULE`      | JS rules under `/etc/polkit-1/rules.d/*` and `/usr/share/polkit-1/rules.d/*`.             |
+| `PAM_FILE`         | `/etc/pam.d/<service>` PAM stack definitions.                                             |
+| `SSH_KEY`          | An SSH host or user key file (authorized_keys, id_rsa, ssh_host_*_key).                   |
+| `NFS_EXPORT`       | A single export entry from `/etc/exports`.                                                |
+| `CONTAINER_MARKER` | The analyzed system's container context (Docker, LXC, Kubernetes, etc.).                  |
+| `NETWORK_LISTENER` | A TCP or UDP listening port parsed from `/proc/net/{tcp,tcp6,udp,udp6}`.                  |
+| `PATH_DIR`         | A directory on `$PATH`.                                                                   |
+| `LOGIN_HOOK`       | A file in `/etc/skel/` (template for new user homes).                                     |
+| `SECRET_FINDING`   | An exposed credential (e.g. from `/proc/[pid]/environ`).                                  |
+| `DBUS_POLICY`      | A `<policy>` block from `/etc/dbus-1/system.d/*.conf` flagged as over-permissive.         |
+| `INETD_SERVICE`    | A service from `/etc/inetd.conf` or `/etc/xinetd.d/*`.                                    |
+| `APPARMOR_PROFILE` | An AppArmor profile under `/etc/apparmor.d/*`, with runtime mode.                         |
+| `MOUNT`            | A bind mount from `/proc/mounts` flagged as writable without `nosuid`.                    |
 
 Each node has:
 
@@ -40,18 +56,23 @@ Each node has:
 An edge represents a relationship between two nodes that has privilege
 significance.
 
-| Edge type        | Source                                       | Target              | Meaning                                              |
-|------------------|----------------------------------------------|---------------------|------------------------------------------------------|
-| `MEMBER_OF`      | `USER`                                       | `GROUP`             | User belongs to group (primary or supplementary).    |
-| `GRANTS`         | `USER` / `GROUP`                             | `SUDO_RULE`         | Principal is authorized by this sudo rule.           |
-| `GRANTS`         | `SUDO_RULE`                                  | `USER`              | Sudo rule's effective `runas` user.                  |
-| `GRANTS`         | `CAPABILITY`                                 | `USER`              | Holding this cap effectively yields target user.     |
-| `CAN_WRITE`      | `USER`                                       | `FILE` / `DIRECTORY`| User can modify the target.                          |
-| `CAN_EXEC`       | `USER`                                       | `FILE` / `SUID_BINARY` | User can execute the target.                      |
-| `SUID_EXEC`      | `USER`                                       | `SUID_BINARY`       | Any user can invoke this SUID-root binary.           |
-| `RUNS_AS`        | `CRON_JOB` / `SYSTEMD_UNIT` / `SUID_BINARY`  | `USER`              | Execution context runs as this user.                 |
-| `EXECUTES`       | `CRON_JOB` / `SYSTEMD_UNIT` / `INITD_SCRIPT` | `FILE`              | Execution context invokes this file.                 |
-| `HAS_CAPABILITY` | `FILE`                                       | `CAPABILITY`        | File has the named capability set.                   |
+| Edge type           | Source                                              | Target                              | Meaning                                                                   |
+|---------------------|-----------------------------------------------------|-------------------------------------|---------------------------------------------------------------------------|
+| `MEMBER_OF`         | `USER`                                              | `GROUP`                             | User belongs to group (primary or supplementary).                         |
+| `GRANTS`            | `USER` / `GROUP`                                    | `SUDO_RULE` / `DOAS_RULE`           | Principal is authorized by this sudo/doas rule.                           |
+| `GRANTS`            | `SUDO_RULE` / `DOAS_RULE`                           | `USER`                              | Rule's effective runas/target user.                                       |
+| `GRANTS`            | `CAPABILITY`                                        | `USER`                              | Holding this cap effectively yields target user.                          |
+| `CAN_WRITE`         | `USER`                                              | `FILE` / `DIRECTORY` / etc.         | User can modify the target. Reason in edge property: world / group / acl. |
+| `CAN_EXEC`          | `USER`                                              | `FILE` / `SUID_BINARY`              | User can execute the target.                                              |
+| `SUID_EXEC`         | `USER`                                              | `SUID_BINARY`                       | Any user can invoke this SUID-root binary.                                |
+| `RUNS_AS`           | `CRON_JOB` / `SYSTEMD_UNIT` / `SUID_BINARY`         | `USER`                              | Execution context runs as this user.                                      |
+| `EXECUTES`          | `CRON_JOB` / `SYSTEMD_UNIT` / `INITD_SCRIPT`        | `FILE`                              | Execution context invokes this file.                                      |
+| `HAS_CAPABILITY`    | `FILE`                                              | `CAPABILITY`                        | File has the named capability set.                                        |
+| `EXECUTED_AT_LOGIN` | `PROFILE_SCRIPT` / `LOGIN_HOOK`                     | `USER`                              | Script is sourced when the named user logs in interactively.              |
+| `INFLUENCES_EXEC`   | `FILE` / `LDPRELOAD_FILE` / `POLKIT_RULE` / `PAM_FILE` / `NFS_EXPORT` | `USER` / `CRON_JOB` / `SYSTEMD_UNIT` | Configuration that controls how privileged execution happens (config arg, dynamic linker, polkit, PAM stack, NFS squash). |
+| `LISTENS_ON`        | `PROCESS`                                           | `NETWORK_LISTENER`                  | Process is bound to this port.                                            |
+| `TRUSTS`            | `FILE` (hosts.equiv / .rhosts)                      | `USER`                              | Password-less login granted via legacy host trust.                        |
+| `EXPOSES`           | `PROCESS`                                           | `SECRET_FINDING`                    | Process exposes credentials via an observable channel (env, args).        |
 
 Each edge has:
 

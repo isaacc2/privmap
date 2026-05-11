@@ -106,10 +106,22 @@ class FilesystemIngester:
                     if path:
                         self._add_world_writable_node(graph, path, is_dir=True)
 
-        # Parse permissions file
+        # Parse permissions file. This must run before group-writable so the
+        # latter can re-stat (or rather: re-read) mode bits.
         perms_file = self._path("suid", "permissions.txt")
         if os.path.isfile(perms_file):
             self._parse_permissions_file(graph, perms_file)
+
+        # Parse group-writable files captured by collect.sh. Format per line:
+        #   mode owner group path
+        # (same shape as permissions.txt). Lets us emit CAN_WRITE edges scoped
+        # to each member of the file's group in snapshot mode.
+        gw_files = self._path("suid", "group_writable_files.txt")
+        if os.path.isfile(gw_files):
+            self._parse_group_writable_file(graph, gw_files, is_dir=False)
+        gw_dirs = self._path("suid", "group_writable_dirs.txt")
+        if os.path.isfile(gw_dirs):
+            self._parse_group_writable_file(graph, gw_dirs, is_dir=True)
 
         # Parse ACLs from snapshot
         acl_file = self._path("acl", "acls.txt")
@@ -189,6 +201,17 @@ class FilesystemIngester:
                 logger.debug("Skipping world-writable in sticky dir: %s", fpath)
             else:
                 self._add_world_writable_node(graph, fpath, is_dir=is_dir, stat_result=st)
+
+        # Group-writable. Each member of the file's group gets a CAN_WRITE edge.
+        # Sticky-bit suppression applies here too: a group-writable file inside
+        # a sticky directory still can't be replaced by non-owners.
+        if (mode & stat.S_IWGRP) and not (mode & stat.S_IWOTH):
+            if not is_dir and self._parent_is_sticky(fpath):
+                logger.debug("Skipping group-writable in sticky dir: %s", fpath)
+            else:
+                self._add_group_writable_node(
+                    graph, fpath, is_dir=is_dir, stat_result=st,
+                )
 
     @staticmethod
     def _parent_is_sticky(fpath: str) -> bool:
@@ -283,6 +306,81 @@ class FilesystemIngester:
                 properties={"reason": "world-writable"},
             ))
 
+    def _add_group_writable_node(
+        self,
+        graph: PrivilegeGraph,
+        fpath: str,
+        is_dir: bool = False,
+        stat_result=None,
+        group_name_override: Optional[str] = None,
+    ) -> None:
+        """Emit CAN_WRITE edges from each user in the file's group.
+
+        Group ownership is via the standard group bit (mode g+w), not via
+        an ACL. This is the most common privesc vector privmap was missing.
+
+        ``group_name_override`` is required in snapshot mode because the
+        analyst's local /etc/group does not match the target's gid -> name
+        mapping. In live mode it can be omitted and we look up via grp.
+        """
+        import grp
+
+        ntype = NodeType.DIRECTORY if is_dir else NodeType.FILE
+        node_id = f"{'dir' if is_dir else 'file'}:{fpath}"
+
+        group_name: Optional[str] = group_name_override
+        props = {"path": fpath, "group_writable": True}
+        if stat_result:
+            props["mode"] = oct(stat.S_IMODE(stat_result.st_mode))
+            props["sticky"] = bool(stat_result.st_mode & stat.S_ISVTX)
+            if group_name is None:
+                try:
+                    group_name = grp.getgrgid(stat_result.st_gid).gr_name
+                except (KeyError, ImportError):
+                    group_name = None
+            if group_name:
+                props["group"] = group_name
+            else:
+                props["group"] = str(stat_result.st_gid) if stat_result else "?"
+
+        if not group_name:
+            return
+
+        # Don't flood the graph with edges for root-owned-by-root files.
+        if group_name == "root":
+            return
+
+        node = Node(id=node_id, node_type=ntype, name=fpath, properties=props)
+        graph.add_node(node)
+
+        group_node = graph.get_node(f"group:{group_name}")
+        if group_node is None:
+            return
+
+        # Find users in this group by walking inbound MEMBER_OF edges.
+        member_ids = [
+            edge.source_id
+            for edge in graph.get_edges_to(group_node.id)
+            if edge.edge_type == EdgeType.MEMBER_OF
+        ]
+
+        for user_id in member_ids:
+            user_node = graph.get_node(user_id)
+            if user_node is None:
+                continue
+            # Skip root: root can write everything anyway, no escalation value.
+            if user_node.properties.get("uid") == 0:
+                continue
+            graph.add_edge(Edge(
+                source_id=user_id,
+                target_id=node_id,
+                edge_type=EdgeType.CAN_WRITE,
+                properties={
+                    "reason": "group-writable",
+                    "group": group_name,
+                },
+            ))
+
     def _check_symlink(self, graph: PrivilegeGraph, link: str, target: str) -> None:
         sensitive_targets = {
             "/etc/shadow", "/etc/passwd", "/etc/sudoers",
@@ -323,7 +421,7 @@ class FilesystemIngester:
                 if result.returncode == 0:
                     self._parse_acl_output(graph, result.stdout)
             except subprocess.TimeoutExpired:
-                # An ACL scan that times out has produced incomplete output —
+                # An ACL scan that times out has produced incomplete output -
                 # surface this loudly so a user doesn't trust a clean report.
                 logger.warning(
                     "ACL scan timed out on %s; results for this path are incomplete. "
@@ -352,7 +450,7 @@ class FilesystemIngester:
             if len(parts) < 3:
                 continue
             kind, name, perms = parts[0], parts[1], parts[2]
-            # Skip the bare "user::" / "group::" / "other::" mode entries —
+            # Skip the bare "user::" / "group::" / "other::" mode entries -
             # those duplicate the standard mode bits handled elsewhere.
             if not name or "w" not in perms:
                 continue
@@ -366,7 +464,7 @@ class FilesystemIngester:
                 group_id = f"group:{name}"
                 if not graph.get_node(group_id):
                     continue
-                # Expand the group into its member users — MEMBER_OF runs
+                # Expand the group into its member users - MEMBER_OF runs
                 # user -> group, so we walk incoming edges on the group.
                 principals = [
                     edge.source_id
@@ -404,6 +502,50 @@ class FilesystemIngester:
                 self._parse_acl_output(graph, f.read())
         except (OSError, PermissionError) as e:
             logger.debug("Cannot read ACL file %s: %s", acl_path, e)
+
+    def _parse_group_writable_file(
+        self,
+        graph: PrivilegeGraph,
+        path: str,
+        is_dir: bool,
+    ) -> None:
+        """Parse the group_writable_{files,dirs}.txt snapshot files.
+
+        Format per line: ``mode owner group path``. For each line we
+        synthesize a stat-like result and dispatch to the in-memory
+        group-writable emitter, which handles group-member expansion.
+        """
+        class _FakeStat:
+            __slots__ = ("st_mode", "st_uid", "st_gid")
+
+            def __init__(self, mode: int, gid: int = -1) -> None:
+                self.st_mode = mode
+                self.st_uid = 0
+                self.st_gid = gid
+
+        try:
+            with open(path, "r") as f:
+                for line in f:
+                    parts = line.strip().split(None, 3)
+                    if len(parts) < 4:
+                        continue
+                    mode_s, owner, group, fpath = parts
+                    try:
+                        mode = int(mode_s, 8)
+                    except ValueError:
+                        continue
+                    # Only emit if group bit really is set; the file may
+                    # have been captured for other reasons (e.g. a broader
+                    # find that grabbed everything mode-g+w in the path).
+                    if not (mode & stat.S_IWGRP):
+                        continue
+                    st = _FakeStat(mode | (stat.S_IFDIR if is_dir else stat.S_IFREG), -1)
+                    self._add_group_writable_node(
+                        graph, fpath, is_dir=is_dir, stat_result=st,
+                        group_name_override=group,
+                    )
+        except (OSError, PermissionError) as e:
+            logger.debug("Cannot read group-writable file %s: %s", path, e)
 
     def _parse_permissions_file(self, graph: PrivilegeGraph, perms_path: str) -> None:
         """Parse the permissions.txt from snapshot (mode owner group path)."""

@@ -1,5 +1,5 @@
 #!/bin/sh
-# privmap snapshot collector — POSIX-compliant, no dependencies
+# privmap snapshot collector. POSIX-compliant, no dependencies.
 # Run as root on the target system to collect privilege-relevant data.
 set -eu
 trap 'rm -rf "${OUTDIR:-}" 2>/dev/null || true' EXIT INT TERM
@@ -16,7 +16,12 @@ if [ "$(id -u)" -ne 0 ]; then
     echo "[!] WARNING: Not running as root. Results will be incomplete."
 fi
 
-mkdir -p "${OUTDIR}"/{etc,proc,suid,caps,cron,systemd,initd,acl}
+# POSIX shells (dash, ash, etc.) do not expand brace lists. Use an explicit
+# loop so this script behaves identically under /bin/sh, bash, zsh, and any
+# other POSIX shell.
+for d in etc proc suid caps cron systemd initd acl meta boot path pam network ssh container; do
+    mkdir -p "${OUTDIR}/${d}"
+done
 
 # ── Identity and access ──
 echo "[+] Collecting identity files..."
@@ -76,6 +81,18 @@ echo "[+] Scanning for world-writable files..."
 find /etc /usr /opt /var /tmp -perm -0002 -type f 2>/dev/null > "${OUTDIR}/suid/world_writable_files.txt" || true
 find /etc /usr /opt /var /tmp -perm -0002 -type d 2>/dev/null > "${OUTDIR}/suid/world_writable_dirs.txt" || true
 
+# ── Group-writable files (excluding root group ownership) ──
+echo "[+] Scanning for group-writable files..."
+# Format: mode owner group path
+find /etc /usr /opt /var -perm -0020 -type f ! -group root 2>/dev/null \
+    -printf '%m %u %g %p\n' > "${OUTDIR}/suid/group_writable_files.txt" 2>/dev/null \
+    || find /etc /usr /opt /var -perm -0020 -type f ! -group root 2>/dev/null \
+        -exec stat -c '%a %U %G %n' {} \; > "${OUTDIR}/suid/group_writable_files.txt" 2>/dev/null || true
+find /etc /usr /opt /var -perm -0020 -type d ! -group root 2>/dev/null \
+    -printf '%m %u %g %p\n' > "${OUTDIR}/suid/group_writable_dirs.txt" 2>/dev/null \
+    || find /etc /usr /opt /var -perm -0020 -type d ! -group root 2>/dev/null \
+        -exec stat -c '%a %U %G %n' {} \; > "${OUTDIR}/suid/group_writable_dirs.txt" 2>/dev/null || true
+
 # ── Capabilities ──
 echo "[+] Collecting capabilities..."
 if command -v getcap >/dev/null 2>&1; then
@@ -121,6 +138,98 @@ find /tmp /var/tmp /dev/shm -type l 2>/dev/null | while read -r link; do
     target=$(readlink -f "$link" 2>/dev/null || echo "unresolved")
     echo "$link -> $target"
 done > "${OUTDIR}/suid/symlinks.txt" 2>/dev/null || true
+
+# ── v2.0 extra surfaces ──
+# These mirror the target's natural /etc layout so the ingester's
+# self._abs(path) resolves correctly in both live and snapshot mode.
+
+echo "[+] Collecting login-time scripts..."
+for f in /etc/profile /etc/bash.bashrc /etc/bashrc /etc/csh.cshrc /etc/csh.login; do
+    [ -r "$f" ] && cp "$f" "${OUTDIR}/etc/" 2>/dev/null || true
+done
+if [ -d /etc/zsh ]; then
+    mkdir -p "${OUTDIR}/etc/zsh"
+    cp -r /etc/zsh/* "${OUTDIR}/etc/zsh/" 2>/dev/null || true
+fi
+for d in /etc/profile.d /etc/bashrc.d /etc/skel; do
+    if [ -d "$d" ]; then
+        mkdir -p "${OUTDIR}${d}"
+        cp -r "$d"/* "${OUTDIR}${d}/" 2>/dev/null || true
+    fi
+done
+
+echo "[+] Collecting library-loading control files..."
+for f in /etc/ld.so.preload /etc/ld.so.conf; do
+    [ -r "$f" ] && cp "$f" "${OUTDIR}/etc/" 2>/dev/null || true
+done
+if [ -d /etc/ld.so.conf.d ]; then
+    mkdir -p "${OUTDIR}/etc/ld.so.conf.d"
+    cp -r /etc/ld.so.conf.d/* "${OUTDIR}/etc/ld.so.conf.d/" 2>/dev/null || true
+fi
+
+echo "[+] Collecting polkit rules..."
+for d in /etc/polkit-1/rules.d /usr/share/polkit-1/rules.d /etc/polkit-1/localauthority; do
+    if [ -d "$d" ]; then
+        mkdir -p "${OUTDIR}${d}"
+        cp -r "$d"/* "${OUTDIR}${d}/" 2>/dev/null || true
+    fi
+done
+
+echo "[+] Collecting doas configuration..."
+[ -r /etc/doas.conf ] && cp /etc/doas.conf "${OUTDIR}/etc/" 2>/dev/null || true
+
+echo "[+] Capturing sudo version..."
+if command -v sudo >/dev/null 2>&1; then
+    sudo --version 2>/dev/null | head -1 > "${OUTDIR}/meta/sudo_version.txt" || true
+fi
+
+echo "[+] Collecting PAM files..."
+if [ -d /etc/pam.d ]; then
+    mkdir -p "${OUTDIR}/etc/pam.d"
+    cp -r /etc/pam.d/* "${OUTDIR}/etc/pam.d/" 2>/dev/null || true
+fi
+
+echo "[+] Collecting security configs..."
+if [ -d /etc/security ]; then
+    mkdir -p "${OUTDIR}/etc/security"
+    cp -r /etc/security/* "${OUTDIR}/etc/security/" 2>/dev/null || true
+fi
+
+echo "[+] Collecting SSH configs..."
+if [ -d /etc/ssh ]; then
+    mkdir -p "${OUTDIR}/etc/ssh"
+    [ -r /etc/ssh/sshd_config ] && cp /etc/ssh/sshd_config "${OUTDIR}/etc/ssh/sshd_config" 2>/dev/null || true
+    # Capture host-key metadata without the keys themselves.
+    find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*' 2>/dev/null \
+        -printf '%m %u %g %p\n' >> "${OUTDIR}/etc/ssh/host_keys_meta.txt" 2>/dev/null \
+        || find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*' 2>/dev/null \
+            -exec stat -c '%a %U %G %n' {} \; >> "${OUTDIR}/etc/ssh/host_keys_meta.txt" 2>/dev/null || true
+fi
+
+echo "[+] Collecting network configs..."
+for f in /etc/exports /etc/fstab /etc/hosts.equiv /etc/shosts.equiv /etc/hosts; do
+    [ -r "$f" ] && cp "$f" "${OUTDIR}/etc/" 2>/dev/null || true
+done
+mkdir -p "${OUTDIR}/proc/net"
+for f in /proc/net/tcp /proc/net/tcp6 /proc/net/udp /proc/net/udp6; do
+    [ -r "$f" ] && cp "$f" "${OUTDIR}/proc/net/" 2>/dev/null || true
+done
+
+echo "[+] Capturing container markers..."
+[ -e /.dockerenv ] && touch "${OUTDIR}/.dockerenv"
+[ -e /run/.containerenv ] && mkdir -p "${OUTDIR}/run" && touch "${OUTDIR}/run/.containerenv"
+mkdir -p "${OUTDIR}/proc/1"
+[ -r /proc/1/cgroup ] && cp /proc/1/cgroup "${OUTDIR}/proc/1/cgroup" 2>/dev/null || true
+[ -r /proc/self/status ] && cp /proc/self/status "${OUTDIR}/proc/1/status" 2>/dev/null || true
+
+echo "[+] Capturing process environments..."
+for pid_dir in /proc/[0-9]*; do
+    pid=$(basename "$pid_dir")
+    if [ -r "${pid_dir}/environ" ]; then
+        mkdir -p "${OUTDIR}/proc/${pid}" 2>/dev/null
+        cp "${pid_dir}/environ" "${OUTDIR}/proc/${pid}/environ.txt" 2>/dev/null || true
+    fi
+done
 
 # ── Package into archive ──
 echo "[+] Creating archive..."

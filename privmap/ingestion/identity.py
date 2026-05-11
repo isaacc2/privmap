@@ -206,7 +206,7 @@ class IdentityIngester:
                             ]
                             continue
 
-                        # Defaults lines — skip
+                        # Defaults lines - skip
                         if line.startswith("Defaults"):
                             continue
 

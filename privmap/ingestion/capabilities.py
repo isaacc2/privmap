@@ -34,7 +34,7 @@ DANGEROUS_CAPS = {
 # linux-exploit-suggester) and aligns with default package configurations on
 # Debian, Ubuntu, RHEL, and Fedora.
 #
-# Single source of truth — imported by graph.traversal as well.
+# Single source of truth - imported by graph.traversal as well.
 KNOWN_SAFE_CAP_BINARIES = {
     "ping", "ping4", "ping6",
     "mtr", "mtr-packet",
@@ -65,13 +65,13 @@ def _user_can_execute(
     Falls through user -> group -> other so that a user who is also in
     the file's group still gets group access if the user-bit is unset.
 
-    Fails closed on stat errors — without mode bits we cannot prove the user
+    Fails closed on stat errors - without mode bits we cannot prove the user
     has execute permission, so we don't fabricate a CAN_EXEC edge.
     """
     try:
         st = os.stat(binary_path)
     except (OSError, PermissionError) as e:
-        logger.debug("stat failed on %s: %s — assuming not executable", binary_path, e)
+        logger.debug("stat failed on %s: %s - assuming not executable", binary_path, e)
         return False
 
     mode = st.st_mode
@@ -233,7 +233,7 @@ class CapabilityIngester:
             caps_str = match.group(2).strip()
             binary_name = os.path.basename(binary_path)
 
-            # Skip known-safe binaries — these carry caps for legitimate internal
+            # Skip known-safe binaries - these carry caps for legitimate internal
             # use and don't expose them to the caller in an exploitable way.
             if binary_name in KNOWN_SAFE_CAP_BINARIES:
                 logger.debug(
@@ -309,7 +309,7 @@ class CapabilityIngester:
             # that's missing or doesn't list this binary we fail closed (no edge)
             # rather than over-reporting CAN_EXEC for every non-root user.
             for user_node in graph.get_nodes_by_type(NodeType.USER):
-                # Skip root — root can already do everything
+                # Skip root - root can already do everything
                 if user_node.properties.get("uid") == 0:
                     continue
 

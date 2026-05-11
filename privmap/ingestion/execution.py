@@ -56,7 +56,7 @@ class ExecutionIngester:
                 entries = os.listdir(user_cron_dir)
             except (PermissionError, OSError) as e:
                 # /var/spool/cron/crontabs is mode 0730 root:crontab on Debian-
-                # family systems — unreadable to non-root callers. Warn but
+                # family systems - unreadable to non-root callers. Warn but
                 # continue so unprivileged users still get a partial scan.
                 logger.warning(
                     "Cannot read user crontab dir %s: %s. "
@@ -108,7 +108,7 @@ class ExecutionIngester:
     def _parse_cron_directory(
         self, graph: PrivilegeGraph, dirpath: str, period: str
     ) -> None:
-        """Parse scripts in /etc/cron.{daily,hourly,...} — run as root."""
+        """Parse scripts in /etc/cron.{daily,hourly,...} - run as root."""
         for fname in os.listdir(dirpath):
             fpath = os.path.join(dirpath, fname)
             if not os.path.isfile(fpath):
@@ -137,6 +137,41 @@ class ExecutionIngester:
                     edge_type=EdgeType.RUNS_AS,
                     properties={"period": period},
                 ))
+
+            # Read script content and extract any binaries it invokes plus
+            # their config-file arguments. This is what closes the chain
+            # for the classic "writable logrotate config + root cron" case.
+            try:
+                with open(fpath, "r", errors="replace") as f:
+                    script_content = f.read()
+            except (OSError, PermissionError):
+                script_content = ""
+
+            for line in script_content.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                # Drop a leading shebang's `#!`/`exec` prefix etc.
+                line = re.sub(r"^\s*(?:exec|eval)\s+", "", line)
+                for config in self._extract_config_arguments(line):
+                    cfg_id = f"file:{config}"
+                    cfg_node = Node(
+                        id=cfg_id,
+                        node_type=NodeType.FILE,
+                        name=config,
+                        properties={"path": config, "config_arg_of": line},
+                    )
+                    graph.add_node(cfg_node)
+                    graph.add_edge(Edge(
+                        source_id=cfg_id,
+                        target_id=cron_id,
+                        edge_type=EdgeType.INFLUENCES_EXEC,
+                        properties={
+                            "mechanism": "command-line config argument",
+                            "command": line,
+                            "source_file": fpath,
+                        },
+                    ))
 
             # Cron executes the script file
             file_id = f"file:{fpath}"
@@ -198,17 +233,23 @@ class ExecutionIngester:
         env_vars: Dict[str, str],
     ) -> None:
         cron_id = f"cron:{source_file}:{command[:80]}"
+        cron_props = {
+            "source": source_file,
+            "schedule": schedule,
+            "run_as": run_as,
+            "command": command,
+            "env": env_vars,
+        }
+        # Wildcard injection: a cron like ``tar czf /backup *`` lets a
+        # writer in the cwd plant a file named ``--checkpoint=exec=...``.
+        if self._has_wildcard_injection_risk(command):
+            cron_props["wildcard_injection_risk"] = True
+
         cron_node = Node(
             id=cron_id,
             node_type=NodeType.CRON_JOB,
             name=f"{run_as}: {command[:80]}",
-            properties={
-                "source": source_file,
-                "schedule": schedule,
-                "run_as": run_as,
-                "command": command,
-                "env": env_vars,
-            },
+            properties=cron_props,
         )
         graph.add_node(cron_node)
 
@@ -222,7 +263,7 @@ class ExecutionIngester:
                 properties={"schedule": schedule},
             ))
 
-        # EXECUTES edge — extract script/binary from command
+        # EXECUTES edge - extract script/binary from command
         scripts = self._extract_executables(command)
         for script in scripts:
             file_id = f"file:{script}"
@@ -239,6 +280,92 @@ class ExecutionIngester:
                 edge_type=EdgeType.EXECUTES,
                 properties={"command": command},
             ))
+
+        # INFLUENCES_EXEC edges from any config-file path arguments back to
+        # the cron job. Patterns like ``logrotate /etc/logrotate.d/myapp``
+        # mean the config file partially controls the privileged execution:
+        # someone who can write the config can hijack the cron's privilege.
+        for config in self._extract_config_arguments(command):
+            cfg_id = f"file:{config}"
+            cfg_node = Node(
+                id=cfg_id,
+                node_type=NodeType.FILE,
+                name=config,
+                properties={"path": config, "config_arg_of": command},
+            )
+            graph.add_node(cfg_node)
+            graph.add_edge(Edge(
+                source_id=cfg_id,
+                target_id=cron_id,
+                edge_type=EdgeType.INFLUENCES_EXEC,
+                properties={
+                    "mechanism": "command-line config argument",
+                    "command": command,
+                },
+            ))
+
+    def _has_wildcard_injection_risk(self, command: str) -> bool:
+        """Heuristic: does the command use a glob in argv to a tool that
+        treats argv items as options? Classic vector: ``tar *`` in cwd."""
+        risky_tools = (
+            "tar", "rsync", "chown", "chmod", "7z", "zip", "unzip",
+            "scp", "find",
+        )
+        for segment in re.split(r"(?:\|\||&&|;|\|)", command):
+            tokens = segment.strip().split()
+            if not tokens:
+                continue
+            i = 0
+            while i < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tokens[i]):
+                i += 1
+            if i >= len(tokens):
+                continue
+            head = os.path.basename(tokens[i]).lower()
+            if head not in risky_tools:
+                continue
+            for arg in tokens[i + 1:]:
+                # Standalone glob (not inside quotes - argv to this process
+                # was already split, so any literal * means cwd expansion).
+                if arg == "*" or arg.startswith("*") or arg.endswith("*"):
+                    return True
+        return False
+
+    def _extract_config_arguments(self, command: str) -> List[str]:
+        """Pull config-file-like absolute paths from command arguments.
+
+        We only consider paths that look like config files: living under
+        common config locations (``/etc/...``, ``/usr/local/etc/...``,
+        ``/opt/.../conf/...``) and not ending in ``/``. This is a heuristic
+        to capture things like ``logrotate /etc/logrotate.d/myapp`` where
+        the second arg is a config the binary reads, without false-positive
+        matching every directory listed in a ``find /etc ...`` command.
+        """
+        results: List[str] = []
+        for segment in re.split(r"(?:\|\||&&|;|\||\bthen\b|\bdo\b)", command):
+            tokens = segment.strip().split()
+            i = 0
+            while i < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tokens[i]):
+                i += 1
+            # tokens[i] is the binary; everything after is args.
+            for token in tokens[i + 1:]:
+                if not token.startswith("/"):
+                    continue
+                if token.endswith("/"):
+                    continue
+                # Heuristic: config-y locations only. Excludes things like
+                # ``find /etc -name foo`` where /etc is a search root.
+                if (
+                    token.startswith("/etc/")
+                    and not token.endswith("/etc")
+                    and "/etc/" not in token[5:]  # avoid /etc/something/etc/
+                ):
+                    if "." in os.path.basename(token) or "/" in token[5:]:
+                        # something like /etc/logrotate.d/foo or /etc/foo.conf
+                        results.append(token)
+                elif token.startswith("/usr/local/etc/") or token.startswith("/opt/"):
+                    if "." in os.path.basename(token) or "/" in token.rsplit("/", 1)[0]:
+                        results.append(token)
+        return results
 
     def _extract_executables(self, command: str) -> List[str]:
         """Extract the executable path(s) from a command string.
@@ -264,7 +391,7 @@ class ExecutionIngester:
             if i >= len(tokens):
                 continue
             head = tokens[i]
-            # Only emit absolute paths — relative names depend on $PATH and
+            # Only emit absolute paths - relative names depend on $PATH and
             # would create ambiguous file nodes.
             if head.startswith("/") and not head.endswith("/"):
                 executables.append(head)
@@ -342,6 +469,27 @@ class ExecutionIngester:
             if cap_match:
                 props["ambient_capabilities"] = cap_match.group(1).strip()
 
+        # Systemd PATH overrides: ``Environment="PATH=..."``.
+        # If the unit runs as root and uses unqualified binary names,
+        # writability of any directory on this PATH is a privesc chain.
+        path_overrides = []
+        for env_match in re.finditer(
+            r'^Environment\s*=\s*"?PATH=([^"\n]+)"?', content, re.MULTILINE,
+        ):
+            path_overrides.append(env_match.group(1).strip())
+        if path_overrides:
+            props["path_overrides"] = path_overrides
+
+        # Wildcard injection. Flag any ExecStart that contains an unquoted
+        # ``*`` in a position likely to be argv expansion.
+        wildcard_findings = []
+        for cmd in exec_cmds:
+            if re.search(r"(?:^|\s)[^'\"]*?\*(?:\s|$)", cmd) and "find " not in cmd[:20]:
+                # ``find ... *`` is sometimes legitimate. Heuristic only.
+                wildcard_findings.append(cmd)
+        if wildcard_findings:
+            props["wildcard_commands"] = wildcard_findings
+
         unit_node = Node(
             id=unit_id,
             node_type=NodeType.SYSTEMD_UNIT,
@@ -377,6 +525,26 @@ class ExecutionIngester:
                     target_id=file_id,
                     edge_type=EdgeType.EXECUTES,
                     properties={"command": cmd},
+                ))
+
+            # Config-arg INFLUENCES_EXEC edges, same as cron.
+            for config in self._extract_config_arguments(cmd):
+                cfg_id = f"file:{config}"
+                cfg_node = Node(
+                    id=cfg_id,
+                    node_type=NodeType.FILE,
+                    name=config,
+                    properties={"path": config, "config_arg_of": cmd},
+                )
+                graph.add_node(cfg_node)
+                graph.add_edge(Edge(
+                    source_id=cfg_id,
+                    target_id=unit_id,
+                    edge_type=EdgeType.INFLUENCES_EXEC,
+                    properties={
+                        "mechanism": "ExecStart config argument",
+                        "command": cmd,
+                    },
                 ))
 
     def _extract_executables_from_cmd(self, cmd: str) -> List[str]:

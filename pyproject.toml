@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "privmap"
-version = "1.0.8"
+version = "2.0.0"
 description = "Find Linux privilege escalation paths by modeling permissions as a graph."
 readme = "README.md"
 license = {text = "MIT"}

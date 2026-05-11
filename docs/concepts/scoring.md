@@ -43,10 +43,20 @@ The following lower the exploitability score:
 
 The following raise it:
 
-- **`NOPASSWD:`** on a sudo rule. No credential prompt, fully scripted.
+- **`NOPASSWD:`** on a sudo rule, or `nopass` on a doas rule. No
+  credential prompt, fully scripted.
 - **World-writable execution targets.** Anyone can swap the binary.
 - **Capability binaries with dangerous caps.** `cap_setuid+ep` on a
   binary the user can execute is a direct privilege escalation.
+
+Additional v2.0 scoring factors:
+
+- **`EXECUTED_AT_LOGIN`**: chains that require waiting for a root
+  login carry the same penalty as cron-dependent chains.
+- **`INFLUENCES_EXEC`-only chains**: paths that rely on indirect
+  control (config arg, dynamic linker preload, polkit rule, PAM
+  configuration) get a small penalty over direct-execution chains.
+  They are still real escalations, just slightly more situational.
 
 [gtfobins]: https://gtfobins.github.io/
 
@@ -58,6 +68,8 @@ Impact is governed by what the path reaches, not how it gets there:
 |-------------------------------------------------------|--------|
 | `root` (uid 0)                                        | 10     |
 | Sudo `ALL` (transitively root)                        | 10     |
+| doas rule with target=root and command=ALL            | 10     |
+| Container marker with breakout artifacts              | 10     |
 | Dangerous capability (transitively root)              | 9 to 10|
 | Privileged service account (postgres, www-data, etc.) | 5 to 7 |
 | Non-system account                                    | 2 to 4 |

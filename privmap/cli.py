@@ -1,4 +1,4 @@
-"""privmap CLI — entry point and argument parsing."""
+"""privmap CLI - entry point and argument parsing."""
 from __future__ import annotations
 
 import argparse
@@ -22,7 +22,7 @@ from privmap.output.markdown_export import export_markdown
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="privmap",
-        description="Linux privilege graph engine — trace escalation paths.",
+        description="Linux privilege graph engine - trace escalation paths.",
     )
     parser.add_argument(
         "--version", action="version", version=f"privmap {__version__}"
@@ -88,7 +88,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 
 # Hard limits on snapshot extraction to defend against malicious or malformed archives.
-# 2 GiB total uncompressed, 200k members — comfortable headroom for a legitimate
+# 2 GiB total uncompressed, 200k members - comfortable headroom for a legitimate
 # whole-system snapshot, low enough to refuse a tar/zip bomb.
 _MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024 * 1024
 _MAX_SNAPSHOT_MEMBERS = 200_000
@@ -220,7 +220,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Severity filter
     min_severity = Severity(args.min_severity.upper())
 
-    # Progress spinner — always on stderr so it doesn't pollute json/markdown
+    # Progress spinner - always on stderr so it doesn't pollute json/markdown
     # output, and so a user piping `privmap > report.json` still sees it.
     # Suppressed by --quiet, in non-TTY environments, and when -v/-vv is on
     # (raw log lines are more useful then than a transient spinner).

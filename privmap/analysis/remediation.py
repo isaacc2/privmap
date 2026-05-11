@@ -37,14 +37,40 @@ def generate_remediation(path: EscalationPath) -> None:
                 steps.append(
                     f"chown {owner}:root {file_path}"
                 )
-            elif reason == "ACL":
+            elif reason == "group-writable":
+                group = edge.properties.get("group", "")
+                risks.append(
+                    f"Group-writable file {file_path} (group: {group}, mode: {mode})"
+                )
+                steps.append(
+                    f"chmod g-w {file_path}"
+                )
+                steps.append(
+                    f"chown root:root {file_path}"
+                )
+            elif reason == "owner-writable":
+                risks.append(
+                    f"Owner-writable file {file_path} owned by non-root (mode: {mode})"
+                )
+                steps.append(
+                    f"chown root:root {file_path}"
+                )
+                steps.append(
+                    f"chmod 644 {file_path}"
+                )
+            elif reason and reason.startswith("ACL"):
                 risks.append(
                     f"ACL grants write access to {file_path}"
                 )
-                user_name = source_node.name if source_node else "user"
-                steps.append(
-                    f"setfacl -x u:{user_name} {file_path}"
-                )
+                principal = edge.properties.get("acl_principal", "")
+                if principal:
+                    if "group" in reason:
+                        steps.append(f"setfacl -x g:{principal} {file_path}")
+                    else:
+                        steps.append(f"setfacl -x u:{principal} {file_path}")
+                else:
+                    user_name = source_node.name if source_node else "user"
+                    steps.append(f"setfacl -x u:{user_name} {file_path}")
             else:
                 risks.append(
                     f"Writable file {file_path} (mode: {mode})"
@@ -71,7 +97,7 @@ def generate_remediation(path: EscalationPath) -> None:
                 binary_name = os.path.basename(binary) if "/" in binary else binary
                 risks.append(
                     f"Sudo rule allows {binary_name}"
-                    f"{' (NOPASSWD)' if nopasswd else ''} — may permit shell escape"
+                    f"{' (NOPASSWD)' if nopasswd else ''} - may permit shell escape"
                 )
                 # Suggest sudoedit for editors
                 if binary_name in ("vim", "vi", "nano", "emacs"):
@@ -131,6 +157,64 @@ def generate_remediation(path: EscalationPath) -> None:
                     steps.append(
                         f"Ensure {script} is owned by root with mode 755 or stricter"
                     )
+
+        elif edge.edge_type == EdgeType.EXECUTED_AT_LOGIN:
+            if source_node and target_node:
+                script = source_node.properties.get("path", source_node.name)
+                user = target_node.name
+                risks.append(
+                    f"{script} is sourced when {user} logs in"
+                )
+                steps.append(
+                    f"chown root:root {script}; chmod 644 {script}"
+                )
+
+        elif edge.edge_type == EdgeType.INFLUENCES_EXEC:
+            if source_node and target_node:
+                mech = edge.properties.get("mechanism", "indirect")
+                src_path = source_node.properties.get("path", source_node.name)
+                tgt = target_node.name
+                risks.append(
+                    f"{src_path} controls how {tgt} runs ({mech})"
+                )
+                if "ld" in mech.lower() or "preload" in mech.lower():
+                    steps.append(
+                        f"chown root:root {src_path}; chmod 644 {src_path}"
+                    )
+                elif "config" in mech.lower():
+                    steps.append(
+                        f"chown root:root {src_path}; chmod 644 {src_path}"
+                    )
+                elif "pam" in mech.lower() or "PAM" in mech:
+                    steps.append(
+                        f"Review {src_path} for pam_rootok/pam_permit/nullok directives"
+                    )
+                else:
+                    steps.append(
+                        f"Audit ownership and permissions on {src_path}"
+                    )
+
+        elif edge.edge_type == EdgeType.TRUSTS:
+            if source_node:
+                src = source_node.properties.get("path", source_node.name)
+                risks.append(
+                    f"Host-trust file {src} grants password-less access"
+                )
+                steps.append(
+                    f"Remove or restrict {src}; r-command trust is generally deprecated"
+                )
+
+        elif edge.edge_type == EdgeType.EXPOSES:
+            if target_node:
+                keys = target_node.properties.get("keys", [])
+                pid = target_node.properties.get("pid", "?")
+                risks.append(
+                    f"Process pid {pid} exposes credentials in its environment "
+                    f"({', '.join(keys[:3])}{'...' if len(keys) > 3 else ''})"
+                )
+                steps.append(
+                    "Read credentials from files (mode 0600) instead of environment variables"
+                )
 
         elif edge.edge_type == EdgeType.MEMBER_OF:
             if target_node:

@@ -1,4 +1,4 @@
-"""privmap — Linux privilege graph engine.
+"""privmap - Linux privilege graph engine.
 
 Public Python API. All names re-exported below are stable across patch
 and minor releases within the 1.x line. See

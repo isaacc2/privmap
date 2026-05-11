@@ -50,8 +50,11 @@ def _compute_exploitability(path: EscalationPath) -> float:
     # Check for timing dependencies (cron = must wait)
     has_cron_dependency = False
     has_sudo_nopasswd = False
+    has_doas_nopass = False
     has_suid = False
     has_restricted_sudo = False
+    has_login_wait = False     # path requires waiting for a privileged login
+    has_influence_only = False  # path relies on INFLUENCES_EXEC (config arg, ld.so, etc.)
 
     for edge in path.edges:
         if edge.edge_type == EdgeType.EXECUTES:
@@ -67,10 +70,9 @@ def _compute_exploitability(path: EscalationPath) -> float:
         if edge.edge_type == EdgeType.GRANTS:
             if edge.properties.get("nopasswd"):
                 has_sudo_nopasswd = True
+            if edge.properties.get("nopass"):
+                has_doas_nopass = True
 
-            # Check for argument-restricted sudo rules. A command like
-            # "/usr/bin/systemctl restart nginx" has args after the binary,
-            # which limits what the user can actually do.
             cmd = edge.properties.get("command", "")
             if cmd and cmd != "ALL":
                 parts = cmd.strip().split()
@@ -80,17 +82,29 @@ def _compute_exploitability(path: EscalationPath) -> float:
         if edge.edge_type == EdgeType.SUID_EXEC:
             has_suid = True
 
-    if has_cron_dependency:
-        score -= 2.0  # Must wait for cron trigger
+        if edge.edge_type == EdgeType.EXECUTED_AT_LOGIN:
+            has_login_wait = True
 
-    if has_sudo_nopasswd:
-        score += 1.0  # No password needed is easier
+        if edge.edge_type == EdgeType.INFLUENCES_EXEC:
+            has_influence_only = True
+
+    if has_cron_dependency:
+        score -= 2.0
+    if has_login_wait:
+        score -= 2.0  # similar to cron: must wait for a root login
+
+    if has_sudo_nopasswd or has_doas_nopass:
+        score += 1.0
 
     if has_suid:
-        score += 0.5  # Direct execution, no waiting
+        score += 0.5
 
     if has_restricted_sudo:
         score -= _RESTRICTED_SUDO_PENALTY
+
+    if has_influence_only:
+        # Influence edges are real but more situational than direct EXECUTES.
+        score -= 0.5
 
     # Direct sudo ALL -> root is trivial
     if hops <= 2 and any(
@@ -116,11 +130,25 @@ def _compute_impact(path: EscalationPath) -> float:
         cmd = sink.properties.get("command", "")
         if cmd == "ALL":
             return 10.0
-        # Argument-restricted sudo command — partial access
+        # Argument-restricted sudo command - partial access
         parts = cmd.strip().split()
         if len(parts) > 1:
             return 5.0
         return 7.0  # Unrestricted single command, possible shell escape
+
+    # doas rule granting root
+    if sink.node_type == NodeType.DOAS_RULE:
+        target = sink.properties.get("target", "")
+        if target == "root":
+            cmd = sink.properties.get("command", "ALL")
+            return 10.0 if cmd == "ALL" else 7.0
+        return 5.0
+
+    # Container breakout marker - full host root if exploitable.
+    if sink.node_type == NodeType.CONTAINER_MARKER:
+        if sink.properties.get("breakout_artifacts"):
+            return 10.0
+        return 6.0
 
     # Dangerous capability
     if sink.node_type == NodeType.CAPABILITY:
